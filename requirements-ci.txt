@@ -1,0 +1,37 @@
+# requirements-ci.txt - Same as requirements.txt but without pyaudio
+fastapi==0.103.2
+uvicorn==0.29.0
+
+# Config (Pydantic v2)
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Whisper + deps
+torch==2.0.1
+openai-whisper==20230918
+numpy==1.26.2
+
+# Mic capture - SKIPPED in CI: pyaudio==0.2.13
+
+# For uploads (the /transcribe endpoint)
+python-multipart==0.0.9
+
+# For frontend
+gradio==4.44.1
+requests==2.32.3
+
+# For model provisioning from Hugging Face Hub
+huggingface-hub==0.25.2
+
+# llama.cpp Python bindings
+llama-cpp-python==0.2.90
+
+# 🔧 System & hardware info (used by backend/hw_detect.py)
+psutil==5.9.8
+
+# Text-to-Speech engine
+pyttsx3==2.90
+
+# Testing
+pytest==8.3.2
+pytest-asyncio>=0.23.5
