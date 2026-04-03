@@ -200,8 +200,10 @@ py -3.11 -m venv .venv
 3) **Run the server (FastAPI + Gradio UI)**
 
     ```bash
-    .\.venv\Scripts\python server.py
+    python server.py
     ```
+
+    If `.venv` exists and you launch `server.py` from a different Python, Jarvin will re-run itself under the repo venv automatically.
 
     API base: `http://127.0.0.1:8000`
     UI:       `http://127.0.0.1:8000/ui`   (auto-opens if JARVIN_GRADIO_AUTO_OPEN=true)
