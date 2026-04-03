@@ -9,7 +9,7 @@ from typing import Optional
 
 import config as cfg
 from audio.mic import get_default_input_device_index
-from backend.ai_engine import JarvinConfig
+from backend.ai_engine import build_jarvin_config
 from backend.listener.intents import intent_shutdown, intent_confirm, CONFIRM_WINDOW_SEC
 from backend.listener.live_state import set_snapshot, set_status
 from backend.listener.loop import AudioLoop
@@ -48,7 +48,7 @@ async def run_listener(stop_event: asyncio.Event, initial_delay: float = 0.2) ->
         log.exception("No input device available: %s", e)
         device_index = None
 
-    cfg_ai = JarvinConfig()
+    cfg_ai = build_jarvin_config(mode="voice_fast")
     pending_shutdown_deadline: Optional[float] = None
 
     def _on_recording(flag: bool) -> None:

@@ -26,15 +26,17 @@ class SimpleMessage(_StrictModel):
 
 class ChatRequest(_StrictModel):
     user_text: str
+    mode: str | None = None
     context: str | None = None
     system_instructions: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
     # NEW: controls for including server-side memory/profile
     use_history: bool = True
-    history_window: int = 6
+    history_window: int | None = None
     use_profile: bool = True
 
 
 class ChatResponse(_StrictModel):
     reply: str
+    mode_used: str

@@ -1,48 +1,49 @@
-# ui/handlers.py
 from __future__ import annotations
 
 import logging
 import time
-from typing import List, Tuple
+
 import gradio as gr
 
+from backend.ai_engine import mode_hint, mode_label, normalize_mode
+from backend.listener.live_state import get_snapshot
+from memory.conversation import get_conversation_history
 from ui.actions import (
-    save_user_profile,
-    clear_conversation_history,
-    update_history_display,
-    get_save_confirmation,
-    # convo controls
-    get_conversation_menu,
     activate_conversation,
+    clear_conversation_history,
     create_conversation,
-    rename_active_conversation,
     delete_active_conversation,
+    format_active_conversation,
+    get_conversation_menu,
+    get_save_confirmation,
+    rename_active_conversation,
+    save_user_profile,
+    update_history_display,
 )
 from ui.api import (
+    api_get_audio_devices,
+    api_get_llm_options,
+    api_get_status,
+    api_post_audio_select,
+    api_post_chat,
+    api_post_llm_select,
+    api_post_shutdown,
     api_post_start,
     api_post_stop,
-    api_post_shutdown,
-    api_get_status,
-    status_str,
     button_updates,
-    api_get_audio_devices,
-    api_post_audio_select,
+    status_str,
 )
-from backend.listener.live_state import get_snapshot
 
-log = logging.getLogger("jarvin.ui.audio")
+log = logging.getLogger("jarvin.ui")
 
 
 def _short(s: str | None, n: int = 80) -> str:
     if not s:
         return ""
-    return s if len(s) <= n else (s[: n - 1] + "…")
+    return s if len(s) <= n else (s[: n - 3] + "...")
 
-
-# ---------- Profile tab bindings ----------
 
 def bind_profile_actions(components: dict) -> None:
-    # Save profile
     components["save_btn"].click(
         fn=save_user_profile,
         inputs=[
@@ -55,7 +56,6 @@ def bind_profile_actions(components: dict) -> None:
         outputs=[components["user_context"]],
     ).then(fn=get_save_confirmation, outputs=[components["status"]])
 
-    # ---- Mic device UI helpers ----
     def _present_from_data(data: dict):
         devices = data.get("devices", [])
         sel_idx = data.get("selected_index")
@@ -63,7 +63,7 @@ def bind_profile_actions(components: dict) -> None:
         choices = [f"[{d['index']}] {d['name']}" for d in devices]
         selected = f"[{sel_idx}] {sel_name}" if sel_idx is not None and sel_name else None
         label = (
-            f"**Current input device:** `{sel_idx}` — **{sel_name}**"
+            f"**Current input device:** `{sel_idx}` - **{sel_name}**"
             if sel_idx is not None and sel_name
             else "_No input device available_"
         )
@@ -92,14 +92,14 @@ def bind_profile_actions(components: dict) -> None:
     def _apply_device(value: str | None):
         idx = _value_to_index(value)
         if idx is None:
-            return gr.update(), "⚠️ Invalid selection."
+            return gr.update(), "Invalid selection."
 
         before = api_get_audio_devices()
         cur_idx = before.get("selected_index")
         cur_name = before.get("selected_name")
         if cur_idx is not None and idx == cur_idx:
             choices, selected, label = _present_from_data(before)
-            return gr.update(choices=choices, value=selected), f"✅ Already using {label}"
+            return gr.update(choices=choices, value=selected), f"Already using {label}"
 
         t0 = time.perf_counter()
         res = api_post_audio_select(idx, restart=True)
@@ -107,11 +107,11 @@ def bind_profile_actions(components: dict) -> None:
             dt = (time.perf_counter() - t0) * 1000
             err = res.get("error", "unknown error")
             log.error("UI apply device failed in %.1f ms -> %s", dt, err)
-            return gr.update(), f"❌ Failed to select device: {err}"
+            return gr.update(), f"Failed to select device: {err}"
 
         after = api_get_audio_devices()
         choices, selected, label = _present_from_data(after)
-        return gr.update(choices=choices, value=selected), f"✅ Switched to {label}"
+        return gr.update(choices=choices, value=selected), f"Switched to {label}"
 
     components["device_refresh_btn"].click(
         fn=_refresh_devices,
@@ -129,34 +129,93 @@ def bind_profile_actions(components: dict) -> None:
     components["_init_devices_fn"] = _refresh_devices
 
 
-# ---------- Live tab bindings (conversation list + controls) ----------
-
 def bind_live_actions(components: dict) -> None:
-    # ---- Conversations panel wiring ----
+    def _conversation_heading(selected: str | None) -> str:
+        return format_active_conversation(selected)
+
+    def _choice_tuples(items: list[dict]) -> list[tuple[str, str]]:
+        return [(str(item.get("label") or item.get("value") or ""), str(item.get("value") or "")) for item in items]
+
+    def _model_choices_for_backend(options: dict, backend: str | None) -> list[tuple[str, str]]:
+        selected_backend = str(backend or "").strip().lower()
+        key = "ollama_model_choices" if selected_backend == "ollama_http" else "local_model_choices"
+        return _choice_tuples(list(options.get(key) or []))
+
+    def _selected_model_for_backend(options: dict, backend: str | None) -> str | None:
+        selected_backend = str(backend or "").strip().lower()
+        current_backend = str(options.get("current_backend") or "").strip().lower()
+        current_model = str(options.get("current_model") or "").strip()
+        if selected_backend == current_backend and current_model:
+            return current_model
+        choices = _model_choices_for_backend(options, selected_backend)
+        return choices[0][1] if choices else None
+
+    def _render_llm_options(options: dict, *, selected_backend: str | None = None):
+        backend_value = str(selected_backend or options.get("current_backend") or "llama_cpp").strip().lower()
+        backend_choices = _choice_tuples(list(options.get("backend_choices") or []))
+        model_choices = _model_choices_for_backend(options, backend_value)
+        model_value = _selected_model_for_backend(options, backend_value)
+        status_bits: list[str] = []
+        if model_value:
+            backend_label = "Embedded llama.cpp" if backend_value == "llama_cpp" else "Headless Ollama"
+            status_bits.append(f"Current engine: **{backend_label}**  |  Model: `{model_value}`")
+        message = str(options.get("message") or "").strip()
+        if message:
+            status_bits.append(message)
+        ollama_error = str(options.get("ollama_error") or "").strip()
+        if ollama_error and backend_value == "ollama_http":
+            status_bits.append(f"Ollama note: {ollama_error}")
+        status_text = "  \n".join(status_bits) if status_bits else "&nbsp;"
+        return (
+            options,
+            gr.update(choices=backend_choices, value=backend_value),
+            gr.update(choices=model_choices, value=model_value),
+            status_text,
+        )
+
+    def _refresh_llm_settings():
+        options = api_get_llm_options()
+        return _render_llm_options(options)
+
+    def _on_backend_change(selected_backend: str | None, options: dict | None):
+        opts = dict(options or {})
+        if not opts:
+            opts = api_get_llm_options()
+        _, _, model_update, status_text = _render_llm_options(opts, selected_backend=selected_backend)
+        return model_update, status_text
+
+    def _apply_llm_settings(backend: str | None, model: str | None):
+        chosen_backend = str(backend or "").strip().lower()
+        chosen_model = str(model or "").strip()
+        if not chosen_backend or not chosen_model:
+            return gr.update(), gr.update(), gr.update(), "Choose a backend and model first."
+        options = api_post_llm_select(chosen_backend, chosen_model, load_now=True)
+        _, backend_update, model_update, status_text = _render_llm_options(options)
+        return options, backend_update, model_update, status_text
 
     def _on_select_conversation(value):
         (choices, selected, subtitle), history = activate_conversation(value)
         return (
-            gr.update(choices=choices, value=selected),  # conv_list
-            subtitle,                                    # conv_status
-            history,                                     # conversation_memory
-            "",                                          # conv_error
+            gr.update(choices=choices, value=selected),
+            _conversation_heading(selected),
+            history,
+            "",
         )
 
     def _on_new_conversation():
         (choices, selected, subtitle), history = create_conversation(None)
         return (
             gr.update(choices=choices, value=selected),
-            subtitle,
+            _conversation_heading(selected),
             history,
             "",
         )
 
     def _on_rename_conversation(title):
-        (choices, selected, subtitle) = rename_active_conversation(title)
+        choices, selected, subtitle = rename_active_conversation(title)
         return (
             gr.update(choices=choices, value=selected),
-            subtitle,
+            _conversation_heading(selected),
             "",
         )
 
@@ -164,27 +223,26 @@ def bind_live_actions(components: dict) -> None:
         (choices, selected, subtitle), history, error = delete_active_conversation()
         return (
             gr.update(choices=choices, value=selected),
-            subtitle,
+            _conversation_heading(selected),
             history,
             error,
         )
 
-    # Clear conversation -> wipe active convo only
     def _clear_all_conversation():
         history = clear_conversation_history()
         return history, ""
 
-    # 3-dots menu visibility toggle
+    def _close_conv_menu_on_success(error: str | None):
+        keep_open = bool((error or "").strip())
+        return keep_open, gr.update(visible=keep_open)
+
     def _toggle_conv_menu(open_state: bool | None):
-        is_open = bool(open_state)
-        new_open = not is_open
+        new_open = not bool(open_state)
         return new_open, gr.update(visible=new_open)
 
     def _close_conv_menu():
-        # Force menu closed, used by the "Close" button on the overlay
         return False, gr.update(visible=False)
 
-    # Buttons (listener)
     def _start_listener():
         api_post_start()
         s = api_get_status()
@@ -201,11 +259,49 @@ def bind_live_actions(components: dict) -> None:
     def _shutdown_server():
         api_post_shutdown()
         start_u, pause_u = button_updates(False, disable_all=True)
-        return ('<span class="status-badge status-stopped">Shutting down…</span>', start_u, pause_u)
+        return '<span class="status-badge status-stopped">Shutting down...</span>', start_u, pause_u
 
-    # --- Wire conversation list and menu ---
+    def _update_chat_mode_hint(mode: str | None):
+        return mode_hint(mode)
 
-    # Selecting a conversation from the list
+    def _begin_typed_chat(user_text: str | None, mode: str | None):
+        text = (user_text or "").strip()
+        if not text:
+            return "Type a message to Jarvin first.", gr.update(interactive=True)
+        return f"Thinking in **{mode_label(mode)}**...", gr.update(interactive=False)
+
+    def _send_typed_chat(user_text: str | None, mode: str | None):
+        text = (user_text or "").strip()
+        if not text:
+            return (
+                gr.update(),
+                gr.update(),
+                user_text or "",
+                "Type a message to Jarvin first.",
+                gr.update(interactive=True),
+            )
+
+        normalized_mode = normalize_mode(mode)
+        try:
+            result = api_post_chat(text, mode=normalized_mode)
+            history = get_conversation_history()
+            used_mode = normalize_mode(result.get("mode_used"))
+            return (
+                history,
+                update_history_display(history),
+                "",
+                f"Reply ready in **{mode_label(used_mode)}** mode.",
+                gr.update(interactive=True),
+            )
+        except Exception as e:
+            return (
+                gr.update(),
+                gr.update(),
+                user_text or "",
+                f"Chat failed: {e}",
+                gr.update(interactive=True),
+            )
+
     components["conv_list"].change(
         fn=_on_select_conversation,
         inputs=[components["conv_list"]],
@@ -223,7 +319,6 @@ def bind_live_actions(components: dict) -> None:
         show_progress=False,
     )
 
-    # New chat button (no title input; rename handled via menu)
     components["new_conv_btn"].click(
         fn=_on_new_conversation,
         outputs=[
@@ -238,7 +333,6 @@ def bind_live_actions(components: dict) -> None:
         outputs=[components["chat_history"]],
     )
 
-    # Toggle the conversation menu (⋯)
     components["conv_menu_btn"].click(
         fn=_toggle_conv_menu,
         inputs=[components["conv_menu_open_state"]],
@@ -246,14 +340,12 @@ def bind_live_actions(components: dict) -> None:
         show_progress=False,
     )
 
-    # Explicit close button inside the overlay
     components["conv_menu_close_btn"].click(
         fn=_close_conv_menu,
         outputs=[components["conv_menu_open_state"], components["conv_menu_group"]],
         show_progress=False,
     )
 
-        # Rename current conversation, then close the menu
     components["rename_conv_btn"].click(
         fn=_on_rename_conversation,
         inputs=[components["rename_conv_title"]],
@@ -268,7 +360,6 @@ def bind_live_actions(components: dict) -> None:
         show_progress=False,
     )
 
-        # Delete current conversation (blocked if it's the only one), then close the menu
     components["delete_conv_btn"].click(
         fn=_on_delete_conversation,
         outputs=[
@@ -283,12 +374,12 @@ def bind_live_actions(components: dict) -> None:
         outputs=[components["chat_history"]],
         show_progress=False,
     ).then(
-        fn=_close_conv_menu,
+        fn=_close_conv_menu_on_success,
+        inputs=[components["conv_error"]],
         outputs=[components["conv_menu_open_state"], components["conv_menu_group"]],
         show_progress=False,
     )
 
-    # Clear current active conversation history, then close the menu
     components["clear_conv_btn"].click(
         fn=_clear_all_conversation,
         outputs=[components["conversation_memory"], components["conv_error"]],
@@ -303,7 +394,6 @@ def bind_live_actions(components: dict) -> None:
         show_progress=False,
     )
 
-    # --- Start / Stop / Shutdown controls ---
     components["start_btn"].click(
         fn=_start_listener,
         outputs=[components["status_banner"], components["start_btn"], components["stop_btn"]],
@@ -318,4 +408,79 @@ def bind_live_actions(components: dict) -> None:
         fn=_shutdown_server,
         outputs=[components["status_banner"], components["start_btn"], components["stop_btn"]],
         concurrency_limit=2,
+    )
+
+    components["chat_mode"].change(
+        fn=_update_chat_mode_hint,
+        inputs=[components["chat_mode"]],
+        outputs=[components["chat_mode_hint"]],
+        show_progress=False,
+    )
+
+    components["llm_refresh_btn"].click(
+        fn=_refresh_llm_settings,
+        outputs=[
+            components["llm_options_state"],
+            components["llm_backend"],
+            components["llm_model"],
+            components["llm_status"],
+        ],
+        show_progress=False,
+    )
+
+    components["llm_backend"].change(
+        fn=_on_backend_change,
+        inputs=[components["llm_backend"], components["llm_options_state"]],
+        outputs=[components["llm_model"], components["llm_status"]],
+        show_progress=False,
+    )
+
+    components["llm_apply_btn"].click(
+        fn=_apply_llm_settings,
+        inputs=[components["llm_backend"], components["llm_model"]],
+        outputs=[
+            components["llm_options_state"],
+            components["llm_backend"],
+            components["llm_model"],
+            components["llm_status"],
+        ],
+        show_progress=False,
+    )
+
+    components["chat_send_btn"].click(
+        fn=_begin_typed_chat,
+        inputs=[components["chat_input"], components["chat_mode"]],
+        outputs=[components["chat_status"], components["chat_send_btn"]],
+        show_progress=False,
+    ).then(
+        fn=_send_typed_chat,
+        inputs=[components["chat_input"], components["chat_mode"]],
+        outputs=[
+            components["conversation_memory"],
+            components["chat_history"],
+            components["chat_input"],
+            components["chat_status"],
+            components["chat_send_btn"],
+        ],
+        show_progress=False,
+    )
+
+    components["_init_llm_fn"] = _refresh_llm_settings
+
+    components["chat_input"].submit(
+        fn=_begin_typed_chat,
+        inputs=[components["chat_input"], components["chat_mode"]],
+        outputs=[components["chat_status"], components["chat_send_btn"]],
+        show_progress=False,
+    ).then(
+        fn=_send_typed_chat,
+        inputs=[components["chat_input"], components["chat_mode"]],
+        outputs=[
+            components["conversation_memory"],
+            components["chat_history"],
+            components["chat_input"],
+            components["chat_status"],
+            components["chat_send_btn"],
+        ],
+        show_progress=False,
     )

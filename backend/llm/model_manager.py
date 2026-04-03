@@ -87,6 +87,11 @@ def get_spec_by_logical_name(name: str, profile: Optional[HardwareProfile] = Non
             return spec
     raise ValueError(f"Unknown logical model name: {name}")
 
+
+def list_available_specs(profile: Optional[HardwareProfile] = None) -> List[GGUFModelSpec]:
+    profile = profile or detect_hardware()
+    return list(_registry(profile))
+
 def pick_model(profile: Optional[HardwareProfile] = None) -> GGUFModelSpec:
     s = cfg.settings
     profile = profile or detect_hardware()

@@ -9,7 +9,7 @@ import config as cfg
 from backend.core.ports import ASRTranscriber, LLMChatEngine, AudioSink
 from audio.wav_io import write_wav_int16_mono as _write_wav_int16_mono
 from backend.util.paths import temp_unique_path
-from backend.ai_engine import JarvinConfig, build_context
+from backend.ai_engine import JarvinConfig, build_context, build_jarvin_config
 from backend.asr.whisper import WhisperASR
 from backend.llm.runtime_local import LocalChat
 from backend.tts.engine import synth_to_wav
@@ -56,7 +56,7 @@ def process_utterance(
     audio_sink: Optional[AudioSink] = None,
 ) -> Tuple[str, str, Dict[str, int], str, Optional[str]]:
     s = cfg.settings
-    cfg_ai = cfg_ai or JarvinConfig()
+    cfg_ai = cfg_ai or build_jarvin_config()
 
     # Unique path per utterance to avoid overwriting when multiple cycles run quickly
     wav_path = temp_unique_path(prefix="live_utt_", suffix=".wav")
@@ -102,7 +102,7 @@ def process_utterance(
         # Build compact context for the LLM from in-process memory
         profile = get_user_profile()
         history = get_conversation_history()
-        ctx = build_context(profile=profile, history=history, max_turns=6)
+        ctx = build_context(profile=profile, history=history, max_turns=cfg_ai.history_window)
 
         t1 = time.perf_counter()
         reply = llm.reply(text, context=ctx) or ""

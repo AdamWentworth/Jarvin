@@ -220,6 +220,17 @@ def ensure_llama_loaded() -> Optional["Llama"]:
     return _load_llama()
 
 
+def reset_llama_runtime() -> None:
+    """
+    Drop the cached llama.cpp runtime so the next request reloads it.
+
+    This is used when switching models or backends at runtime.
+    """
+    cache_clear = getattr(_load_llama, "cache_clear", None)
+    if callable(cache_clear):
+        cache_clear()
+
+
 def chat_completion(
     system_prompt: str,
     user_text: str,

@@ -73,20 +73,50 @@ def api_post_transcribe(filepath: str, timeout: float = 60.0) -> dict:
 
 def api_post_chat(
     user_text: str,
+    mode: str | None = None,
     context: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
     system_instructions: str | None = None,
+    use_history: bool = True,
+    history_window: int | None = None,
+    use_profile: bool = True,
     timeout: float = 60.0,
 ) -> dict:
     payload = {
         "user_text": user_text,
+        "mode": mode,
         "context": context,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "system_instructions": system_instructions,
+        "use_history": use_history,
+        "history_window": history_window,
+        "use_profile": use_profile,
     }
     r = requests.post(f"{server_url()}/chat", json=payload, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def api_get_llm_options(timeout: float = 10.0) -> dict:
+    r = requests.get(f"{server_url()}/llm/options", timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def api_post_llm_select(
+    backend: str,
+    model: str,
+    load_now: bool = True,
+    timeout: float = 120.0,
+) -> dict:
+    payload = {
+        "backend": backend,
+        "model": model,
+        "load_now": load_now,
+    }
+    r = requests.post(f"{server_url()}/llm/select", json=payload, timeout=timeout)
     r.raise_for_status()
     return r.json()
 

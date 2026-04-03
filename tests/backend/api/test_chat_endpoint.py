@@ -19,7 +19,7 @@ async def test_chat_endpoint_rejects_empty_text():
 @pytest.mark.asyncio
 async def test_chat_endpoint_returns_reply_and_persists_turns(monkeypatch):
     # --- arrange: mock memory + AI engine ---
-    calls = {"get_profile": 0, "get_history": 0, "append": []}
+    calls = {"get_profile": 0, "get_history": 0, "append": [], "mode": None}
 
     def fake_get_user_profile():
         calls["get_profile"] += 1
@@ -33,7 +33,7 @@ async def test_chat_endpoint_returns_reply_and_persists_turns(monkeypatch):
         calls["append"].append((role, message, conversation_id))
 
     def fake_generate_reply(text, cfg=None, context=None):
-        # simple, deterministic reply so tests are stable
+        calls["mode"] = getattr(cfg, "mode", None)
         return f"echo: {text}"
 
     monkeypatch.setattr(chat_mod, "get_user_profile", fake_get_user_profile, raising=True)
@@ -54,10 +54,12 @@ async def test_chat_endpoint_returns_reply_and_persists_turns(monkeypatch):
     # --- assert ---
     assert hasattr(resp, "reply")
     assert resp.reply == "echo: ping"
+    assert resp.mode_used == "chat_balanced"
 
     # profile + history consulted once
     assert calls["get_profile"] == 1
     assert calls["get_history"] == 1
+    assert calls["mode"] == "chat_balanced"
 
     # two turns appended: user + assistant
     assert len(calls["append"]) == 2
@@ -95,3 +97,38 @@ async def test_chat_endpoint_can_disable_profile_and_history(monkeypatch):
 
     assert hasattr(resp, "reply")
     assert resp.reply == "ok"
+    assert resp.mode_used == "chat_balanced"
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_uses_requested_mode(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(chat_mod, "get_user_profile", lambda: {}, raising=True)
+    monkeypatch.setattr(chat_mod, "get_conversation_history", lambda: [], raising=True)
+    monkeypatch.setattr(
+        chat_mod,
+        "append_turn",
+        lambda role, message, conversation_id=None: None,
+        raising=True,
+    )
+
+    def fake_generate_reply(text, cfg=None, context=None):
+        captured["mode"] = getattr(cfg, "mode", None)
+        captured["max_tokens"] = getattr(cfg, "max_tokens", None)
+        return "structured reply"
+
+    monkeypatch.setattr(chat_mod, "generate_reply", fake_generate_reply, raising=True)
+
+    payload = ChatRequest(
+        user_text="plan the next steps",
+        mode="agent_strong",
+        use_profile=False,
+        use_history=False,
+    )
+    resp = await chat_mod.chat_endpoint(payload)
+
+    assert resp.reply == "structured reply"
+    assert resp.mode_used == "agent_strong"
+    assert captured["mode"] == "agent_strong"
+    assert captured["max_tokens"] == 512

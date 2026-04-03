@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter
 
 from backend.api.schemas import ChatRequest, ChatResponse, ErrorResponse
-from backend.ai_engine import generate_reply, JarvinConfig, build_context
+from backend.ai_engine import build_context, build_jarvin_config, generate_reply
 from memory.conversation import (
     get_conversation_history,
     get_user_profile,
@@ -25,12 +25,11 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
     if not text:
         return ErrorResponse(error="empty user_text")
 
-    # Optional style knobs
-    base_cfg = JarvinConfig()
-    cfg = JarvinConfig(
-        system_instructions=(payload.system_instructions or base_cfg.system_instructions),
-        temperature=payload.temperature if payload.temperature is not None else base_cfg.temperature,
-        max_tokens=payload.max_tokens if payload.max_tokens is not None else base_cfg.max_tokens,
+    cfg = build_jarvin_config(
+        mode=payload.mode,
+        system_instructions=payload.system_instructions,
+        temperature=payload.temperature,
+        max_tokens=payload.max_tokens,
     )
 
     # Build compact context
@@ -46,8 +45,9 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         history = []
 
     if profile or history:
+        max_turns = payload.history_window if payload.history_window is not None else cfg.history_window
         ctx_parts.append(
-            build_context(profile=profile, history=history, max_turns=max(1, int(payload.history_window)))
+            build_context(profile=profile, history=history, max_turns=max(1, int(max_turns)))
         )
 
     if payload.context:
@@ -60,7 +60,7 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         # Persist turn so subsequent requests have fresh context
         append_turn("user", text)
         append_turn("assistant", reply)
-        return ChatResponse(reply=reply)
+        return ChatResponse(reply=reply, mode_used=cfg.mode)
     except Exception as e:
         log.exception("Chat generation failed: %s", e)
         return ErrorResponse(error="chat generation failed")

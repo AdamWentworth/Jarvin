@@ -90,6 +90,11 @@ def update_history_display(history):
     return pairs
 
 
+def format_active_conversation(title: str | None) -> str:
+    text = (title or "").strip() or "New conversation"
+    return f"### {text}"
+
+
 def get_save_confirmation():
     profile = get_user_profile()
     return f"✅ Profile saved! Jarvin will remember: {profile.get('name','Unknown')} - {profile.get('goal','No goal set')}"
