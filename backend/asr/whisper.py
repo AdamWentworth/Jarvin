@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 
 import config as cfg
-from audio.wav_io import wav_to_float32_mono_16k
+from audio.wav_io import pcm_to_float32_mono_16k, wav_to_float32_mono_16k
 
 
 def _best_device() -> str:
@@ -110,6 +110,35 @@ def transcribe_audio(
     return result.get("text", "")
 
 
+def transcribe_pcm(
+    pcm: np.ndarray,
+    sample_rate: int,
+    *,
+    model: Optional[whisper.Whisper] = None,
+    device: Optional[str] = None,
+    model_size: Optional[str] = None,
+    normalize_dbfs: Optional[float] = None,
+) -> str:
+    """
+    Transcribe in-memory PCM without a temporary WAV round-trip.
+    """
+    model, device = _ensure_model_and_device(model, device, model_size)
+    waveform: np.ndarray = pcm_to_float32_mono_16k(
+        pcm,
+        sample_rate,
+        normalize_dbfs=normalize_dbfs,
+    )
+
+    fp16 = _infer_fp16_flag(model, device)
+    kwargs = {"fp16": fp16}
+
+    # Inference-mode for speed + lower overhead
+    with torch.inference_mode():
+        result = model.transcribe(waveform, language="en", **kwargs)
+
+    return result.get("text", "")
+
+
 class WhisperASR:
     """Implements ASRTranscriber using a cached Whisper model/device per size."""
     def __init__(self, model_size: Optional[str] = None) -> None:
@@ -117,3 +146,12 @@ class WhisperASR:
 
     def transcribe(self, wav_path: str) -> str:
         return transcribe_audio(wav_path, model=self.model, device=self.device)
+
+    def transcribe_pcm(self, pcm: np.ndarray, sample_rate: int, normalize_dbfs: Optional[float] = None) -> str:
+        return transcribe_pcm(
+            pcm,
+            sample_rate,
+            model=self.model,
+            device=self.device,
+            normalize_dbfs=normalize_dbfs,
+        )

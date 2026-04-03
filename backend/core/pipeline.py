@@ -24,6 +24,26 @@ class _FnSink:
     def write_wav(path: str, pcm: np.ndarray, sample_rate: int, normalize_dbfs: float | None) -> None:
         _write_wav_int16_mono(path, pcm, sample_rate, normalize_dbfs)
 
+
+def _transcribe_with_best_path(
+    asr: ASRTranscriber,
+    *,
+    pcm: np.ndarray,
+    sample_rate: int,
+    wav_path: str,
+    sink: AudioSink,
+    normalize_dbfs: float | None,
+) -> str:
+    transcribe_pcm = getattr(asr, "transcribe_pcm", None)
+    if callable(transcribe_pcm):
+        text = transcribe_pcm(pcm, sample_rate, normalize_dbfs=normalize_dbfs)
+        sink.write_wav(wav_path, pcm, sample_rate, normalize_dbfs)
+        return text
+
+    sink.write_wav(wav_path, pcm, sample_rate, normalize_dbfs)
+    return asr.transcribe(wav_path)
+
+
 def process_utterance(
     pcm: np.ndarray,
     sr: int,
@@ -41,7 +61,6 @@ def process_utterance(
     # Unique path per utterance to avoid overwriting when multiple cycles run quickly
     wav_path = temp_unique_path(prefix="live_utt_", suffix=".wav")
     sink = audio_sink or _FnSink()
-    sink.write_wav(wav_path, pcm, sr, s.normalize_to_dbfs)
 
     utt_ms = int((len(pcm) / max(1, sr)) * 1000)
 
@@ -66,7 +85,14 @@ def process_utterance(
         llm = _LLMWithCfg(LocalChat(), cfg_ai)
 
     t0 = time.perf_counter()
-    text = asr.transcribe(wav_path).strip()
+    text = _transcribe_with_best_path(
+        asr,
+        pcm=pcm,
+        sample_rate=sr,
+        wav_path=wav_path,
+        sink=sink,
+        normalize_dbfs=s.normalize_to_dbfs,
+    ).strip()
     t_trans_ms = int((time.perf_counter() - t0) * 1000)
 
     reply = ""

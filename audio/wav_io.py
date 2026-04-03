@@ -5,6 +5,7 @@ import wave
 import numpy as np
 import os
 
+
 def linear_resample(audio: np.ndarray, src_hz: int, dst_hz: int) -> np.ndarray:
     if src_hz == dst_hz or audio.size == 0:
         return audio.astype(np.float32, copy=False)
@@ -15,6 +16,24 @@ def linear_resample(audio: np.ndarray, src_hz: int, dst_hz: int) -> np.ndarray:
     x_new = np.linspace(0.0, 1.0, num=n, endpoint=False, dtype=np.float64)
     y = np.interp(x_new, xp, fp).astype(np.float32, copy=False)
     return y
+
+
+def _pcm_to_float32(audio: np.ndarray) -> np.ndarray:
+    arr = np.asarray(audio)
+    if arr.dtype == np.float32:
+        return arr
+    if arr.dtype == np.float64:
+        return arr.astype(np.float32, copy=False)
+    if np.issubdtype(arr.dtype, np.integer):
+        return arr.astype(np.float32) / 32768.0
+    return arr.astype(np.float32, copy=False)
+
+
+def _to_mono(audio: np.ndarray) -> np.ndarray:
+    arr = np.asarray(audio)
+    if arr.ndim <= 1:
+        return arr.astype(np.float32, copy=False)
+    return arr.reshape(arr.shape[0], -1).mean(axis=1).astype(np.float32, copy=False)
 
 
 def wav_to_float32_mono_16k(path: str) -> np.ndarray:
@@ -28,10 +47,9 @@ def wav_to_float32_mono_16k(path: str) -> np.ndarray:
     if sampwidth != 2:
         raise ValueError(f"Expected 16-bit PCM; got sampwidth={sampwidth}")
 
-    audio = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-
-    if nch == 2:
-        audio = audio.reshape(-1, 2).mean(axis=1).astype(np.float32, copy=False)
+    audio = _pcm_to_float32(np.frombuffer(audio_bytes, dtype=np.int16))
+    if nch >= 2:
+        audio = _to_mono(audio.reshape(-1, nch))
 
     if fr != 16000:
         audio = linear_resample(audio, src_hz=fr, dst_hz=16000)
@@ -47,6 +65,31 @@ def _peak_normalize_int16(x: np.ndarray, target_dbfs: float) -> np.ndarray:
     target_linear = 32767.0 * (10.0 ** (target_dbfs / 20.0))
     gain = target_linear / float(peak)
     return np.clip(x.astype(np.float32) * gain, -32768.0, 32767.0).astype(np.int16)
+
+
+def pcm_to_float32_mono_16k(
+    pcm: np.ndarray,
+    sample_rate: int,
+    normalize_dbfs: float | None = None,
+) -> np.ndarray:
+    arr = np.asarray(pcm)
+    if arr.size == 0:
+        return np.array([], dtype=np.float32)
+
+    if np.issubdtype(arr.dtype, np.integer):
+        if normalize_dbfs is not None:
+            arr = _peak_normalize_int16(arr.astype(np.int16, copy=False), normalize_dbfs)
+        audio = _pcm_to_float32(arr)
+    else:
+        audio = _pcm_to_float32(arr)
+
+    audio = _to_mono(audio)
+
+    if sample_rate != 16000:
+        audio = linear_resample(audio, src_hz=sample_rate, dst_hz=16000)
+
+    return audio.astype(np.float32, copy=False)
+
 
 def write_wav_int16_mono(path: str, pcm: np.ndarray, sample_rate: int, normalize_dbfs: float | None = None) -> None:
     y = _peak_normalize_int16(pcm, normalize_dbfs) if normalize_dbfs is not None else pcm

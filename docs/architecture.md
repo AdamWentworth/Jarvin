@@ -37,13 +37,15 @@ Normal operation is intended to stay on-device. Models may be downloaded once du
 ### Utterance Processing
 
 - [`backend/core/pipeline.py`](../backend/core/pipeline.py) is the core turn-processing function.
-- It writes a temp WAV, runs ASR, builds short context from saved profile + recent turns, asks the local LLM for a reply, persists the turn, and optionally synthesizes TTS.
+- In the hot path, it runs ASR from in-memory PCM, builds short context from saved profile + recent turns, asks the local LLM for a reply, persists the turn, and optionally synthesizes TTS.
+- It still writes a temp WAV for playback/debug state, but Whisper no longer depends on that file round-trip.
 
 ### ASR
 
 - [`backend/asr/whisper.py`](../backend/asr/whisper.py) owns Whisper model caching and device selection.
 - GPU is preferred automatically when CUDA is available.
 - The current implementation keeps LayerNorm in fp32 on CUDA to avoid mixed-precision errors seen on some Torch / Whisper combinations.
+- The listener path can now transcribe normalized in-memory PCM directly, which avoids a temporary WAV dependency on every turn.
 
 ### LLM
 
