@@ -48,4 +48,5 @@ If a change affects one part of that loop, trace both the upstream input and dow
 - Read `docs/architecture.md` first.
 - Use `docs/runbook.md` for commands instead of guessing.
 - Read `docs/product-vision.md` and `docs/local-model-strategy.md` before making broad UX, model, or latency decisions.
+- Read `docs/roadmap.md` before choosing the next major feature slice.
 - Use `.agents/change-checklist.md` to decide what to verify before closing work.

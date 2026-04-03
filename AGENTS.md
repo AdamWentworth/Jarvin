@@ -6,6 +6,7 @@ If you are an automated agent or using agentic tooling in this repo, start with:
 - [`.agents/change-checklist.md`](.agents/change-checklist.md)
 - [`docs/product-vision.md`](docs/product-vision.md)
 - [`docs/local-model-strategy.md`](docs/local-model-strategy.md)
+- [`docs/roadmap.md`](docs/roadmap.md)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/runbook.md`](docs/runbook.md)
 

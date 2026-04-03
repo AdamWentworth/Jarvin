@@ -8,6 +8,7 @@ Jarvin is meant to become a local-first personal AI assistant that can be used i
 - typed chat
 - agent / task-execution mode
 - mixed mode where replies can be shown as text, spoken aloud, or both
+- remote client usage where a phone can act as the microphone, speaker, and UI for the host machine
 
 The long-term goal is closer to "my own Codex that can speak" than to "a single chatbot with a microphone attached."
 
@@ -32,6 +33,7 @@ Success looks like:
 - short spoken answers by default
 - graceful interruption and restart behavior
 - minimal tool use unless explicitly requested
+- works both locally and from a remote phone client over VPN
 
 ### Chat Balanced
 
@@ -68,6 +70,7 @@ The intended long-term deployment shape is:
 
 - one stronger host machine runs the Jarvin backend, models, and local data
 - other personal devices access Jarvin remotely over a private VPN
+- a phone should be able to serve as a full remote voice client with mic input and spoken output
 - client hardware should matter very little because inference stays on the host
 - the service should be private-first and should not require exposing the app directly to the public internet
 
@@ -77,6 +80,7 @@ This means future architecture decisions should favor:
 - clear authentication and trust boundaries
 - support for multiple clients and sessions
 - keeping heavy model/runtime dependencies on the host, not on every device
+- mobile-friendly UI flows and eventually mobile-safe streaming audio transport
 
 ## Near-Term Decision Rule
 

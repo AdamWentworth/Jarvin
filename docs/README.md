@@ -8,5 +8,6 @@ Use these docs first:
 - `runbook.md`: setup, run, diagnose, and test commands.
 - `product-vision.md`: what Jarvin is trying to become and the interaction modes to design for.
 - `local-model-strategy.md`: the current-hardware model recommendations and optimization roadmap.
+- `roadmap.md`: feature inventory, priority buckets, and phased implementation order.
 
 Agent-specific notes live under `.agents/`.
