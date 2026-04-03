@@ -61,6 +61,37 @@ Explicit venv path:
 .\.venv\Scripts\python server.py
 ```
 
+## Run The Desktop Shell
+
+The new desktop client lives in [clients/jarvin-ui](d:/Projects/Jarvin/clients/jarvin-ui).
+It talks to the Python host over HTTP, so start the host first:
+
+```powershell
+python server.py
+```
+
+Then in a second terminal:
+
+```powershell
+cd clients\jarvin-ui
+npm install
+npm run tauri dev
+```
+
+Build sanity check:
+
+```powershell
+cd clients\jarvin-ui
+npm run tauri build -- --debug --no-bundle
+```
+
+Override the host URL if needed:
+
+```powershell
+$env:VITE_JARVIN_API_BASE_URL = "http://127.0.0.1:8000"
+npm run tauri dev
+```
+
 ## GPU Diagnostics
 
 ```powershell

@@ -19,6 +19,7 @@ from backend.api.routes.chat import router as chat_router
 from backend.api.routes.live import router as live_router
 from backend.api.routes.audio import router as audio_router  # <-- single audio router
 from backend.api.routes.llm import router as llm_router
+from backend.api.routes.workspace import router as workspace_router
 from backend.middleware.graceful_cancel import GracefulCancelMiddleware  # NEW
 from backend.util.paths import ensure_temp_dir
 
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     app.include_router(live_router)
     app.include_router(audio_router)  # <-- single include
     app.include_router(llm_router)
+    app.include_router(workspace_router)
 
     # Serve ephemeral files (ASR/utterances and synthesized TTS) under /_temp
     temp_root = ensure_temp_dir()

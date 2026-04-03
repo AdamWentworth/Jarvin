@@ -31,6 +31,7 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         temperature=payload.temperature,
         max_tokens=payload.max_tokens,
     )
+    conversation_id = payload.conversation_id
 
     # Build compact context
     ctx_parts: list[str] = []
@@ -40,7 +41,7 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         profile = {}
 
     if payload.use_history:
-        history = get_conversation_history()
+        history = get_conversation_history(conversation_id=conversation_id)
     else:
         history = []
 
@@ -58,9 +59,9 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
     try:
         reply = generate_reply(text, cfg=cfg, context=context_str)
         # Persist turn so subsequent requests have fresh context
-        append_turn("user", text)
-        append_turn("assistant", reply)
-        return ChatResponse(reply=reply, mode_used=cfg.mode)
+        append_turn("user", text, conversation_id=conversation_id)
+        append_turn("assistant", reply, conversation_id=conversation_id)
+        return ChatResponse(reply=reply, mode_used=cfg.mode, conversation_id=conversation_id)
     except Exception as e:
         log.exception("Chat generation failed: %s", e)
         return ErrorResponse(error="chat generation failed")

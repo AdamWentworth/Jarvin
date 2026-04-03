@@ -25,7 +25,7 @@ async def test_chat_endpoint_returns_reply_and_persists_turns(monkeypatch):
         calls["get_profile"] += 1
         return {"name": "Test", "goal": "Testing"}
 
-    def fake_get_conversation_history():
+    def fake_get_conversation_history(conversation_id=None):
         calls["get_history"] += 1
         return [("user", "hello"), ("assistant", "hi")]
 
@@ -55,6 +55,7 @@ async def test_chat_endpoint_returns_reply_and_persists_turns(monkeypatch):
     assert hasattr(resp, "reply")
     assert resp.reply == "echo: ping"
     assert resp.mode_used == "chat_balanced"
+    assert resp.conversation_id is None
 
     # profile + history consulted once
     assert calls["get_profile"] == 1
@@ -98,6 +99,7 @@ async def test_chat_endpoint_can_disable_profile_and_history(monkeypatch):
     assert hasattr(resp, "reply")
     assert resp.reply == "ok"
     assert resp.mode_used == "chat_balanced"
+    assert resp.conversation_id is None
 
 
 @pytest.mark.asyncio
@@ -130,5 +132,37 @@ async def test_chat_endpoint_uses_requested_mode(monkeypatch):
 
     assert resp.reply == "structured reply"
     assert resp.mode_used == "agent_strong"
+    assert resp.conversation_id is None
     assert captured["mode"] == "agent_strong"
     assert captured["max_tokens"] == 512
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_can_target_specific_conversation(monkeypatch):
+    calls = {"history": [], "append": []}
+
+    monkeypatch.setattr(chat_mod, "get_user_profile", lambda: {}, raising=True)
+
+    def fake_get_conversation_history(conversation_id=None):
+        calls["history"].append(conversation_id)
+        return []
+
+    def fake_append_turn(role, message, conversation_id=None):
+        calls["append"].append((role, message, conversation_id))
+
+    monkeypatch.setattr(chat_mod, "get_conversation_history", fake_get_conversation_history, raising=True)
+    monkeypatch.setattr(chat_mod, "append_turn", fake_append_turn, raising=True)
+    monkeypatch.setattr(chat_mod, "generate_reply", lambda text, cfg=None, context=None: "ok", raising=True)
+
+    payload = ChatRequest(
+        user_text="hello",
+        conversation_id=42,
+        use_profile=False,
+        use_history=True,
+    )
+    resp = await chat_mod.chat_endpoint(payload)
+
+    assert resp.reply == "ok"
+    assert resp.conversation_id == 42
+    assert calls["history"] == [42]
+    assert calls["append"] == [("user", "hello", 42), ("assistant", "ok", 42)]

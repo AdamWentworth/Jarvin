@@ -26,6 +26,7 @@ class SimpleMessage(_StrictModel):
 
 class ChatRequest(_StrictModel):
     user_text: str
+    conversation_id: int | None = None
     mode: str | None = None
     context: str | None = None
     system_instructions: str | None = None
@@ -40,3 +41,46 @@ class ChatRequest(_StrictModel):
 class ChatResponse(_StrictModel):
     reply: str
     mode_used: str
+    conversation_id: int | None = None
+
+
+class UserProfilePayload(_StrictModel):
+    name: str = ""
+    goal: str = ""
+    mood: str = "Focused"
+    communication_style: str = "Friendly"
+    response_length: str = "Balanced"
+
+
+class ConversationSummary(_StrictModel):
+    id: int
+    title: str
+    created_at: str | None = None
+    messages: int = 0
+    is_active: bool = False
+
+
+class ConversationTurn(_StrictModel):
+    role: str
+    message: str
+
+
+class WorkspaceBootstrapResponse(_StrictModel):
+    profile: UserProfilePayload
+    conversations: list[ConversationSummary]
+    active_conversation_id: int | None = None
+    history: list[ConversationTurn]
+
+
+class ConversationCreateRequest(_StrictModel):
+    title: str | None = None
+
+
+class ConversationRenameRequest(_StrictModel):
+    title: str
+
+
+class ConversationWorkspaceResponse(_StrictModel):
+    conversations: list[ConversationSummary]
+    active_conversation_id: int | None = None
+    history: list[ConversationTurn]
