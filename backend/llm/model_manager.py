@@ -29,6 +29,26 @@ def _registry(profile: HardwareProfile) -> List[GGUFModelSpec]:
 
     if ram >= 8.0:
         candidates.append(GGUFModelSpec(
+            logical_name="qwen2.5-3b-instruct",
+            repo_id="Qwen/Qwen2.5-3B-Instruct-GGUF",
+            filename="qwen2.5-3b-instruct-q5_k_m.gguf",
+            params_b=3,
+            quant="Q5_K_M",
+            mem_req_gb=4.5,
+        ))
+
+    if ram >= 8.0:
+        candidates.append(GGUFModelSpec(
+            logical_name="llama-3.2-3b-instruct",
+            repo_id="bartowski/Llama-3.2-3B-Instruct-GGUF",
+            filename="Llama-3.2-3B-Instruct-Q5_K_M.gguf",
+            params_b=3,
+            quant="Q5_K_M",
+            mem_req_gb=4.5,
+        ))
+
+    if ram >= 8.0:
+        candidates.append(GGUFModelSpec(
             logical_name="mistral-7b-instruct",
             repo_id="TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
             filename="mistral-7b-instruct-v0.2.Q4_K_M.gguf",

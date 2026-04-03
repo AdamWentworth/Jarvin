@@ -21,6 +21,8 @@ _CHAT_FORMAT_BY_LOGICAL: Dict[str, str] = {
     "phi-3-mini-4k-instruct": "chatml",
     "mistral-7b-instruct": "mistral-instruct",
     "neural-chat-7b": "llama-2",
+    "qwen2.5-3b-instruct": "qwen",
+    "llama-3.2-3b-instruct": "llama-3",
 }
 
 
@@ -33,6 +35,10 @@ def _infer_chat_format(spec: GGUFModelSpec) -> Optional[str]:
         return "chatml"
     if "mistral" in fname:
         return "mistral-instruct"
+    if "qwen" in fname:
+        return "qwen"
+    if "llama-3" in fname or "llama3" in fname:
+        return "llama-3"
     if "neural-chat" in fname:
         return "llama-2"
     return None

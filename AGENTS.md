@@ -4,6 +4,8 @@ If you are an automated agent or using agentic tooling in this repo, start with:
 
 - [`.agents/README.md`](.agents/README.md)
 - [`.agents/change-checklist.md`](.agents/change-checklist.md)
+- [`docs/product-vision.md`](docs/product-vision.md)
+- [`docs/local-model-strategy.md`](docs/local-model-strategy.md)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/runbook.md`](docs/runbook.md)
 
