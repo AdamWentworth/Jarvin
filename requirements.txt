@@ -6,7 +6,6 @@ pydantic==2.10.3
 pydantic-settings==2.6.1
 
 # Whisper + deps
-torch==2.0.1
 openai-whisper==20230918
 numpy==1.26.2
 
@@ -24,7 +23,7 @@ requests==2.32.3
 huggingface-hub==0.25.2
 
 # llama.cpp Python bindings
-llama-cpp-python==0.2.90
+llama-cpp-python==0.3.4
 
 # 🔧 System & hardware info (used by backend/hw_detect.py)
 psutil==5.9.8
@@ -35,3 +34,5 @@ pyttsx3==2.90
 # Testing
 pytest==8.3.2
 pytest-asyncio>=0.23.5
+
+diskcache==5.6.3

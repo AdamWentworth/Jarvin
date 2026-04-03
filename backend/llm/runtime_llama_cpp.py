@@ -1,13 +1,16 @@
 # backend/llm/runtime_llama_cpp.py
 from __future__ import annotations
 
+import contextlib
+import io
 import logging
 import os
 from functools import lru_cache
-from typing import List, Dict, Optional, TYPE_CHECKING
+from typing import List, Dict, Optional, TYPE_CHECKING, Tuple
 
 import config as cfg
 from backend.llm.model_manager import pick_model, ensure_download, GGUFModelSpec
+from backend.util.windows_dll import prime_windows_gpu_dll_search_path
 
 if TYPE_CHECKING:
     from llama_cpp import Llama  # type: ignore
@@ -35,20 +38,101 @@ def _infer_chat_format(spec: GGUFModelSpec) -> Optional[str]:
     return None
 
 
-def _env_int(name: str, default: int) -> int:
+def _truthy(s: str | None) -> bool:
+    if s is None:
+        return False
+    return s.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _capture_llama_system_info() -> Tuple[str | None, str | None]:
+    """
+    Best-effort capture of llama.cpp system/build info from llama-cpp-python.
+
+    Returns (version_str, system_info_str). Either may be None.
+    This is the most useful single log to prove whether CUDA/Metal/Vulkan backends exist.
+    """
     try:
-        v = os.getenv(name)
-        return int(v) if v is not None else default
+        prime_windows_gpu_dll_search_path()
+        import llama_cpp  # type: ignore
     except Exception:
-        return default
+        return None, None
+
+    version = getattr(llama_cpp, "__version__", None)
+
+    # Preferred: llama_print_system_info() (prints; may exist depending on version)
+    info: str | None = None
+    if hasattr(llama_cpp, "llama_print_system_info"):
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                llama_cpp.llama_print_system_info()  # type: ignore[attr-defined]
+            info = buf.getvalue().strip() or None
+        except Exception:
+            info = None
+
+    # Fallback: llama_get_system_info() (returns string/bytes on some versions)
+    if info is None and hasattr(llama_cpp, "llama_get_system_info"):
+        try:
+            raw = llama_cpp.llama_get_system_info()  # type: ignore[attr-defined]
+            info = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+            info = info.strip() or None
+        except Exception:
+            info = None
+
+    return version, info
+
+
+def _guess_gpu_support_from_info(info: str | None) -> bool:
+    """
+    Heuristic only. If this says False, you almost certainly have a CPU-only build.
+    """
+    if not info:
+        return False
+    s = info.lower()
+    # markers commonly present in system info when GPU backends are enabled
+    markers = ("cuda", "metal", "vulkan", "opencl", "clblast", "hip", "sycl")
+    return any(m in s for m in markers)
+
+
+def _effective_llm_knobs() -> Tuple[int, Optional[int], int, bool, bool, bool]:
+    """
+    Return (n_ctx, n_threads, n_gpu_layers, verbose, log_system_info, require_gpu)
+    honoring cfg.settings plus a few back-compat env overrides.
+    """
+    s = cfg.settings
+
+    n_ctx = int(getattr(s, "llm_n_ctx", 4096) or 4096)
+    n_threads: Optional[int] = getattr(s, "llm_n_threads", None)
+
+    # Back-compat override
+    n_threads_env = os.getenv("JARVIN_LLM_N_THREADS")
+    if n_threads_env and n_threads_env.isdigit():
+        n_threads = int(n_threads_env)
+
+    n_gpu_layers = int(getattr(s, "llm_n_gpu_layers", 0) or 0)
+
+    verbose = bool(getattr(s, "llm_verbose", False)) or _truthy(os.getenv("JARVIN_LLM_VERBOSE"))
+    log_sys = bool(getattr(s, "llm_log_system_info", True))
+
+    # Allow explicit env to disable logging if needed
+    if os.getenv("JARVIN_LLM_LOG_SYSTEM_INFO") is not None:
+        log_sys = _truthy(os.getenv("JARVIN_LLM_LOG_SYSTEM_INFO"))
+
+    require_gpu = bool(getattr(s, "llm_require_gpu", False)) or _truthy(os.getenv("JARVIN_LLM_REQUIRE_GPU"))
+
+    return n_ctx, n_threads, n_gpu_layers, verbose, log_sys, require_gpu
 
 
 @lru_cache(maxsize=1)
 def _load_llama() -> Optional["Llama"]:
     try:
+        dll_dirs = prime_windows_gpu_dll_search_path()
+        if dll_dirs:
+            log.info("Primed Windows GPU DLL search path with %d director%s.", len(dll_dirs), "y" if len(dll_dirs) == 1 else "ies")
+
         from llama_cpp import Llama  # type: ignore
-    except Exception:
-        log.warning("llama-cpp-python is not installed; local LLM disabled.")
+    except Exception as e:
+        log.warning("llama-cpp-python could not be imported; local LLM disabled. %s", e)
         return None
 
     try:
@@ -56,28 +140,65 @@ def _load_llama() -> Optional["Llama"]:
         model_path = ensure_download(spec, models_dir=cfg.settings.models_dir)
         chat_format = _infer_chat_format(spec)
 
-        n_threads_env = os.getenv("JARVIN_LLM_N_THREADS")
-        n_threads = int(n_threads_env) if n_threads_env and n_threads_env.isdigit() else None
-        n_gpu_layers = _env_int("JARVIN_LLM_N_GPU_LAYERS", 0)
+        n_ctx, n_threads, n_gpu_layers, verbose, log_sys, require_gpu = _effective_llm_knobs()
+
+        # Log build/system info once at load (this is the key proof)
+        llama_ver, sys_info = (None, None)
+        gpu_supported_guess = False
+        if log_sys:
+            llama_ver, sys_info = _capture_llama_system_info()
+            gpu_supported_guess = _guess_gpu_support_from_info(sys_info)
+
+            if llama_ver:
+                log.info("llama-cpp-python version=%s", llama_ver)
+            if sys_info:
+                # Keep it as a single log entry so it's easy to copy/paste.
+                log.info("llama.cpp system info:\n%s", sys_info)
+
+        # If user requested GPU offload, but build looks CPU-only, warn or fail
+        wants_gpu = (n_gpu_layers != 0)
+        if wants_gpu and not gpu_supported_guess:
+            msg = (
+                "GPU offload was requested (n_gpu_layers != 0) but llama.cpp system info does not "
+                "indicate a GPU backend (CUDA/Metal/Vulkan/etc). This usually means you installed a CPU-only "
+                "llama-cpp-python wheel, so the LLM will run on CPU."
+            )
+            if require_gpu:
+                raise RuntimeError(msg)
+            log.warning(msg)
 
         log.info(
-            "🧠 Loading local LLM | path=%s chat_format=%s n_ctx=%d n_threads=%s n_gpu_layers=%d",
+            "🧠 Loading local LLM | path=%s chat_format=%s n_ctx=%d n_threads=%s n_gpu_layers=%d verbose=%s",
             model_path,
             chat_format or "default",
-            4096,
+            n_ctx,
             str(n_threads) if n_threads is not None else "auto",
             n_gpu_layers,
+            str(verbose),
         )
 
+        # NOTE:
+        # - verbose=True is the most direct runtime proof: llama.cpp prints offload lines like
+        #   "offloading X layers to GPU" when GPU is actually used.
         llm = Llama(
             model_path=model_path,
-            n_ctx=4096,
+            n_ctx=n_ctx,
             n_threads=n_threads,
             n_gpu_layers=n_gpu_layers,
             chat_format=chat_format,
-            verbose=False,
+            verbose=verbose,
         )
+
+        # Post-load confirmation log (best-effort; attributes vary by version)
+        try:
+            actual = getattr(llm, "n_gpu_layers", None)
+            if actual is not None:
+                log.info("LLM runtime reports n_gpu_layers=%s", str(actual))
+        except Exception:
+            pass
+
         return llm
+
     except Exception as e:
         log.exception("Failed to load local LLM: %s", e)
         return None

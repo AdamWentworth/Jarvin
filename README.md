@@ -148,7 +148,10 @@ JARVIN_LLM_FORCE_LOGICAL_NAME=phi-3-mini-4k-instruct
 JARVIN_LLM_FLAT_LAYOUT=true
 JARVIN_LLM_CLEAN_VENDOR_DIRS=true
 JARVIN_LLM_N_THREADS=8
-JARVIN_LLM_N_GPU_LAYERS=0   # CPU-only by default
+JARVIN_LLM_N_GPU_LAYERS=-1  # offload all possible layers to GPU
+JARVIN_LLM_VERBOSE=true
+JARVIN_LLM_LOG_SYSTEM_INFO=true
+JARVIN_LLM_REQUIRE_GPU=false
 
 # Persistence (SQLite-backed profile + conversations)
 JARVIN_DATA_DIR=./data
@@ -166,8 +169,19 @@ JARVIN_DB_WAL=true
     pip install -r requirements.txt
     ```
 
-    If `llama-cpp-python` fails to build on Windows, install it via Conda first:
-    conda install -c conda-forge llama-cpp-python
+    For Windows + NVIDIA GPU, use the CUDA-enabled Torch install we verified in this repo:
+
+    ```bash
+    pip install -r requirements-gpu-cu128.txt
+    ```
+
+    Then run the GPU diagnostics:
+
+    ```bash
+    python scripts/diagnose_gpu.py
+    ```
+
+    On this machine, plain `pip install torch` produced a CPU-only wheel. The GPU requirements file avoids that.
 
 2) **Editable install (required for tests)**  
    Makes `backend`, `audio`, and `ui` importable as installed packages.  
@@ -228,10 +242,10 @@ python scripts/record_and_transcribe.py
 
 ### Whisper / PyTorch
 
-We pin `torch==2.0.1`. For CPU-only wheels or newer CUDA stacks, reinstall from the official index:
+If `python scripts/diagnose_gpu.py` reports `torch ... +cpu`, you installed a CPU-only wheel. Reinstall the CUDA build:
 
 ```bash
-pip install --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cpu
+pip install --upgrade --force-reinstall torch==2.7.1+cu128 --index-url https://download.pytorch.org/whl/cu128
 ```
 
 ### Microphone (PyAudio)
@@ -245,7 +259,15 @@ pip install --upgrade --force-reinstall torch --index-url https://download.pytor
 - The live loop **does not call ffmpeg** (raw PCM).  
 - If you still see ffmpeg errors, confirm your `audio/speech_recognition.py` matches the current version.
 
+### NVIDIA GPU checklist
+
+- Jarvin now primes common CUDA DLL directories before importing `llama-cpp-python`.
+- Use `python scripts/diagnose_gpu.py` to verify both Torch and `llama-cpp-python`.
+- Set `JARVIN_LLM_N_GPU_LAYERS=-1` to request full GPU offload and `JARVIN_LLM_REQUIRE_GPU=true` if you want startup to fail when GPU offload is unavailable.
+
 ## llama.cpp on Windows
+
+See the NVIDIA GPU checklist above for the current Windows GPU path.
 
 - Prefer **Conda** binaries to avoid compiling `llama-cpp-python`.  
 - If you compiled and it's slow, ensure it’s a **CPU build** (no GPU expected on this laptop) and that `n_threads` is sensible (auto by default).

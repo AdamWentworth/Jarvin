@@ -24,7 +24,7 @@ requests==2.32.3
 huggingface-hub==0.25.2
 
 # llama.cpp Python bindings
-llama-cpp-python==0.2.90
+llama-cpp-python==0.3.4
 
 # 🔧 System & hardware info (used by backend/hw_detect.py)
 psutil==5.9.8
