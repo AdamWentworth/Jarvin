@@ -16,10 +16,23 @@ Override via env vars (prefix JARVIN_, case-insensitive), e.g.:
   JARVIN_GRADIO_AUTO_OPEN=true
   JARVIN_GRADIO_OPEN_DELAY_SEC=1.0
 
-  # NEW: persistence
+  # persistence
   JARVIN_DATA_DIR=./data
   JARVIN_DB_FILENAME=jarvin.sqlite3
   JARVIN_DB_WAL=true
+
+  # llama.cpp runtime knobs
+  JARVIN_LLM_N_CTX=4096
+  JARVIN_LLM_N_THREADS=8
+  JARVIN_LLM_N_GPU_LAYERS=-1
+
+  # NEW: LLM diagnostics / GPU verification
+  # If true, pass verbose=True to llama.cpp (prints offload info like "offloading X layers to GPU")
+  JARVIN_LLM_VERBOSE=true
+  # If true, capture and log llama.cpp "system info" at load (compile flags / backends)
+  JARVIN_LLM_LOG_SYSTEM_INFO=true
+  # If true, and GPU offload is requested but build looks CPU-only, fail hard at startup
+  JARVIN_LLM_REQUIRE_GPU=false
 """
 from __future__ import annotations
 
@@ -80,6 +93,16 @@ class Settings(BaseSettings):
     llm_flat_layout: bool = True
     llm_clean_vendor_dirs: bool = True
 
+    # llama.cpp runtime knobs
+    llm_n_ctx: int = 4096
+    llm_n_threads: Optional[int] = None
+    llm_n_gpu_layers: int = -1
+
+    # NEW: LLM diagnostics / GPU verification
+    llm_verbose: bool = False
+    llm_log_system_info: bool = True
+    llm_require_gpu: bool = False
+
     # ---- Voice Activity / Noise Gate ----
     vad_calibration_sec: float = 1.5
     vad_threshold_mult: float = 3.0
@@ -117,21 +140,20 @@ class Settings(BaseSettings):
     gradio_auto_open: bool = True
     gradio_open_delay_sec: float = 1.0
 
-    # ---- Persistent data (NEW) ----
+    # ---- Persistent data ----
     data_dir: str = "data"
     db_filename: str = "jarvin.sqlite3"
     db_wal: bool = True  # enable WAL for safe concurrent reads/writes
 
-    # pydantic-settings v2 config (replaces inner Config)
+    # pydantic-settings v2 config
     model_config = SettingsConfigDict(
         env_prefix="JARVIN_",
         case_sensitive=False,
-        extra="ignore",  # ignore stray envs to be safe
+        extra="ignore",
     )
 
     @property
     def db_path(self) -> str:
-        # Resolve to absolute path and ensure folder exists when accessed
         path = os.path.abspath(os.path.join(self.data_dir, self.db_filename))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
@@ -145,17 +167,13 @@ class Settings(BaseSettings):
     @field_validator("whisper_model_size", mode="before")
     @classmethod
     def _validate_whisper_size(cls, v: str | None) -> Optional[str]:
-        """
-        Accept None / "" → None, else enforce known sizes:
-        tiny | base | small | medium | large
-        """
         if v is None:
             return None
         vv = str(v).strip().lower()
         if vv in {"", "none", "auto"}:
             return None
         allowed = {"tiny", "base", "small", "medium", "large"}
-        return vv if vv in allowed else "small"  # safe default
+        return vv if vv in allowed else "small"
 
 
 # Single global instance

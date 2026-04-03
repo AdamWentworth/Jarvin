@@ -163,38 +163,44 @@ JARVIN_DB_WAL=true
 
 ## 🚀 Quick Start
 
+If you change or uninstall the base Python used to create `.venv`, recreate the virtual environment first:
+
+```bash
+py -3.11 -m venv .venv
+```
+
 1) **Install dependencies**
 
     ```bash
-    pip install -r requirements.txt
+    .\.venv\Scripts\python -m pip install -r requirements.txt
     ```
 
     For Windows + NVIDIA GPU, use the CUDA-enabled Torch install we verified in this repo:
 
     ```bash
-    pip install -r requirements-gpu-cu128.txt
+    .\.venv\Scripts\python -m pip install -r requirements-gpu-cu128.txt
     ```
 
     Then run the GPU diagnostics:
 
     ```bash
-    python scripts/diagnose_gpu.py
+    .\.venv\Scripts\python scripts/diagnose_gpu.py
     ```
 
-    On this machine, plain `pip install torch` produced a CPU-only wheel. The GPU requirements file avoids that.
+    On this machine, plain `pip install torch` produced a CPU-only wheel. The GPU requirements file avoids that and also pulls the official Windows CUDA wheel for `llama-cpp-python`.
 
 2) **Editable install (required for tests)**  
    Makes `backend`, `audio`, and `ui` importable as installed packages.  
    The pytest suite expects this layout.
 
    ```bash
-   python -m pip install -e .
+   .\.venv\Scripts\python -m pip install -e .
    ```
 
 3) **Run the server (FastAPI + Gradio UI)**
 
     ```bash
-    python server.py
+    .\.venv\Scripts\python server.py
     ```
 
     API base: `http://127.0.0.1:8000`

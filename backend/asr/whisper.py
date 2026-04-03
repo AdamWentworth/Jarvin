@@ -1,11 +1,13 @@
 # backend/asr/whisper.py
 from __future__ import annotations
-from typing import Optional, Tuple
+
+from typing import Optional
 from functools import lru_cache
 
 import numpy as np
 import whisper
 import torch
+import torch.nn as nn
 
 import config as cfg
 from audio.wav_io import wav_to_float32_mono_16k
@@ -22,23 +24,56 @@ def _best_device() -> str:
     return "cpu"
 
 
+def _force_layernorm_fp32(model: nn.Module) -> None:
+    """
+    Fix mixed-precision LayerNorm issues on some torch/CUDA builds:
+    Whisper's LayerNorm forward does x.float() but if weights are fp16,
+    torch.layer_norm can error: expected Float but found Half.
+
+    Solution: keep LayerNorm params in fp32 even when the model is fp16.
+    """
+    for m in model.modules():
+        if isinstance(m, nn.LayerNorm):
+            m.float()
+
+
+def _infer_fp16_flag(model: whisper.Whisper, device: str) -> bool:
+    """
+    Whisper's transcribe(fp16=...) should match the model's actual dtype.
+    """
+    if device != "cuda":
+        return False
+    try:
+        p = next(model.parameters())
+        return p.dtype == torch.float16
+    except Exception:
+        return False
+
+
 @lru_cache(maxsize=8)
 def _get_model_and_device(model_size: Optional[str]) -> tuple[whisper.Whisper, str]:
     """
-    Cache Whisper model per `model_size`. Changing size in config will now be honored
+    Cache Whisper model per `model_size`. Changing size in config will be honored
     without restarting Python if a different `model_size` is requested.
     """
     device = _best_device()
     size = (model_size or cfg.settings.whisper_model_size or "small").strip().lower()
 
     model = whisper.load_model(size, device=device)
-    # fp16 only on CUDA; MPS/CPU stay in fp32 for stability
+
+    # Prefer fp16 on CUDA for speed, but keep LayerNorm in fp32 to avoid
+    # RuntimeError: expected scalar type Float but found Half
     if device == "cuda":
         try:
             model.half()
+            _force_layernorm_fp32(model)
         except Exception:
             # Non-fatal: run in fp32 instead
-            pass
+            try:
+                model.float()
+            except Exception:
+                pass
+
     return model, device
 
 
@@ -64,9 +99,14 @@ def transcribe_audio(
     """
     model, device = _ensure_model_and_device(model, device, model_size)
     waveform: np.ndarray = wav_to_float32_mono_16k(file_path)
-    # fp16 True only on CUDA
-    kwargs = {"fp16": device == "cuda"}
-    result = model.transcribe(waveform, language="en", **kwargs)
+
+    fp16 = _infer_fp16_flag(model, device)
+    kwargs = {"fp16": fp16}
+
+    # Inference-mode for speed + lower overhead
+    with torch.inference_mode():
+        result = model.transcribe(waveform, language="en", **kwargs)
+
     return result.get("text", "")
 
 
