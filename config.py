@@ -21,7 +21,11 @@ Override via env vars (prefix JARVIN_, case-insensitive), e.g.:
   JARVIN_DB_FILENAME=jarvin.sqlite3
   JARVIN_DB_WAL=true
 
-  # llama.cpp runtime knobs
+  # LLM backend/runtime knobs
+  JARVIN_LLM_BACKEND=llama_cpp
+  JARVIN_OLLAMA_BASE_URL=http://127.0.0.1:11434
+  JARVIN_OLLAMA_MODEL=
+  JARVIN_OLLAMA_TIMEOUT_SEC=60
   JARVIN_LLM_N_CTX=4096
   JARVIN_LLM_N_THREADS=8
   JARVIN_LLM_N_GPU_LAYERS=-1
@@ -78,7 +82,7 @@ class Settings(BaseSettings):
     # Uvicorn access logs (HTTP request lines)
     uvicorn_access_log: bool = False
 
-    # ---- Local LLM (llama.cpp) settings ----
+    # ---- Local LLM settings ----
     models_dir: str = "models"
     llm_backend: str = "llama_cpp"
     llm_auto_provision: bool = True
@@ -92,6 +96,11 @@ class Settings(BaseSettings):
     )
     llm_flat_layout: bool = True
     llm_clean_vendor_dirs: bool = True
+
+    # Optional service backend (Jarvin keeps the UI; this is inference only)
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = ""
+    ollama_timeout_sec: float = 60.0
 
     # llama.cpp runtime knobs
     llm_n_ctx: int = 4096
@@ -174,6 +183,13 @@ class Settings(BaseSettings):
             return None
         allowed = {"tiny", "base", "small", "medium", "large"}
         return vv if vv in allowed else "small"
+
+    @field_validator("llm_backend", mode="before")
+    @classmethod
+    def _validate_llm_backend(cls, v: str | None) -> str:
+        vv = str(v or "").strip().lower()
+        allowed = {"llama_cpp", "ollama_http"}
+        return vv if vv in allowed else "llama_cpp"
 
 
 # Single global instance

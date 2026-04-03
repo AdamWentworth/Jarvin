@@ -10,6 +10,29 @@ This strategy is written for the current local setup:
 - `llama-cpp-python==0.3.4`
 - Whisper on CUDA when available
 
+## Deployment Implication
+
+Because the long-term plan is to run Jarvin on one main machine and access it remotely from other devices over VPN, model selection should be optimized for the host machine only.
+
+That means:
+
+- phone or tablet hardware is mostly irrelevant if they are just clients
+- the host runtime should eventually be easy to expose behind a private local API
+- operational simplicity matters, not just raw tokens per second
+
+## Embedded Vs Headless Service
+
+On current hardware, embedded `llama.cpp` is still the best default for simplicity and direct control.
+
+An Ollama-style headless service becomes interesting when:
+
+- Jarvin is serving multiple devices
+- you want a stable HTTP boundary between UI clients and inference
+- you want Jarvin to keep full UX control while the host runs model inference in a separate process
+
+The key point is that Ollama should be treated as an optional engine, not as the product surface.
+Jarvin should remain the only user-facing UI and orchestration layer.
+
 ## What This Hardware Is Good At
 
 This machine can run small and medium quantized local models comfortably enough for a proof of concept, but it is not a good fit for:
@@ -191,6 +214,21 @@ Near-term target:
 - show speaking
 
 Perceived speed matters almost as much as raw speed in a voice assistant.
+
+### 8. Prepare For A Host-Served Backend
+
+If Jarvin becomes a privately hosted service for multiple devices, the inference layer should be easy to move behind a stable API boundary.
+
+Near-term target:
+
+- keep an embedded local runtime for simple single-machine use
+- add a backend abstraction so Jarvin can also talk to a local host service such as Ollama or `llama-server`
+
+Why it matters:
+
+- easier multi-device access
+- cleaner separation between UI clients and inference runtime
+- simpler path to future hardware upgrades on the host only
 
 ## Recommended Near-Term Build Order
 

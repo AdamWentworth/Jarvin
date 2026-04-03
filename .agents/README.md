@@ -8,6 +8,7 @@ Start here before making changes in this repo.
 - The canonical environment is the repo-local `.venv`.
 - `python server.py` is the friendly command, but the repo still expects packages to be installed into `.venv`.
 - Normal operation should remain local-first and offline-first.
+- The long-term deployment target is one trusted host machine with remote personal devices connecting privately over VPN.
 - User data in `data/` is real local state; treat schema and persistence changes carefully.
 
 ## Mental Model

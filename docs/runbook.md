@@ -28,6 +28,25 @@ Windows + NVIDIA GPU path:
 .\.venv\Scripts\python -m pip install -e .
 ```
 
+## Optional Headless Ollama Backend
+
+Jarvin can use Ollama as an inference service without using any Ollama UI.
+Jarvin still owns the app UI, prompts, and behavior.
+
+Example env overrides:
+
+```powershell
+$env:JARVIN_LLM_BACKEND = "ollama_http"
+$env:JARVIN_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+$env:JARVIN_OLLAMA_MODEL = "your-model-tag"
+```
+
+Notes:
+
+- Jarvin does not auto-pull Ollama models.
+- Provision the Ollama model yourself on the host machine.
+- If you want the embedded path again, set `JARVIN_LLM_BACKEND=llama_cpp`.
+
 ## Run The App
 
 Friendly path:

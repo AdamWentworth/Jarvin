@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional
 
-from backend.llm.runtime_llama_cpp import chat_completion
+from backend.llm.runtime_router import chat_completion
 
 log = logging.getLogger("jarvin.ai")
 

@@ -72,3 +72,18 @@ def test_db_path_creates_directory(tmp_path, monkeypatch):
     assert path.parent == data_dir.resolve()
     # Directory should exist as a side-effect of accessing db_path
     assert path.parent.is_dir()
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("llama_cpp", "llama_cpp"),
+        ("OLLAMA_HTTP", "ollama_http"),
+        ("unknown", "llama_cpp"),
+        ("", "llama_cpp"),
+    ],
+)
+def test_llm_backend_validator(value, expected, monkeypatch):
+    monkeypatch.setenv("JARVIN_LLM_BACKEND", value)
+    s = Settings()
+    assert s.llm_backend == expected

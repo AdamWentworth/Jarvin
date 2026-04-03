@@ -10,3 +10,4 @@ If you are an automated agent or using agentic tooling in this repo, start with:
 - [`docs/runbook.md`](docs/runbook.md)
 
 These files describe the repo's runtime flow, important invariants, and the verification commands expected after common change types.
+They also document the intended deployment direction: one private host machine serving thinner remote clients over VPN.

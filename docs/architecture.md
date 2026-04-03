@@ -12,6 +12,7 @@ Jarvin is a local-first voice assistant for Windows. Its main runtime path is:
 6. FastAPI + Gradio display / control
 
 Normal operation is intended to stay on-device. Models may be downloaded once during setup, but regular inference does not call cloud APIs.
+The planned deployment shape is one trusted host machine serving the app and model runtimes, with other personal devices connecting privately over VPN as thin clients.
 
 ## Startup Flow
 
@@ -51,7 +52,10 @@ Normal operation is intended to stay on-device. Models may be downloaded once du
 
 - [`backend/llm/model_manager.py`](../backend/llm/model_manager.py) chooses and downloads the GGUF model.
 - [`backend/llm/runtime_llama_cpp.py`](../backend/llm/runtime_llama_cpp.py) owns the cached `llama-cpp-python` runtime.
+- [`backend/llm/runtime_router.py`](../backend/llm/runtime_router.py) dispatches between embedded `llama.cpp` and optional service backends.
+- [`backend/llm/runtime_ollama.py`](../backend/llm/runtime_ollama.py) talks to Ollama as a headless HTTP inference service only.
 - [`backend/util/windows_dll.py`](../backend/util/windows_dll.py) primes Windows DLL search paths so CUDA-backed `llama-cpp-python` wheels can find the runtime libraries they need.
+- Jarvin still owns prompts, modes, persistence, and UI behavior even when inference is delegated to another local process.
 
 ### UI and Live State
 
@@ -71,6 +75,7 @@ Normal operation is intended to stay on-device. Models may be downloaded once du
 - `set_snapshot()` is what advances the live sequence number. `set_status()` updates flags without creating a new turn event.
 - The repo is Windows-first right now. GPU setup assumes the Windows CUDA wheel path documented in `requirements-gpu-cu128.txt`.
 - Keep the app local-first unless there is a deliberate product decision to add networked tools.
+- Prefer host-centric designs: the eventual target is one private Jarvin host serving multiple personal devices over VPN, not separate full inference stacks on every client.
 - Prefer additive schema changes in `memory/conversation.py`; users may already have local data.
 
 ## Key Files To Know

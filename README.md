@@ -1,6 +1,6 @@
 # Jarvin AI Assistant
 
-Local, privacy-first voice assistant inspired by J.A.R.V.I.S. It runs entirely on your machine: listens, transcribes speech with Whisper, and generates replies using a local LLM (via llama-cpp-python). No cloud APIs required.
+Local, privacy-first voice assistant inspired by J.A.R.V.I.S. It runs entirely on your machine: listens, transcribes speech with Whisper, and generates replies using a local LLM. The default runtime is `llama-cpp-python`, with optional support for headless Ollama serving. No cloud APIs required.
 
 ---
 
@@ -22,7 +22,7 @@ Local, privacy-first voice assistant inspired by J.A.R.V.I.S. It runs entirely o
 
 - **Backend**: FastAPI, Uvicorn
 - **Speech-to-Text**: OpenAI Whisper (PyTorch)
-- **LLM runtime**: GGUF models via `llama-cpp-python` (auto-provisioned from Hugging Face Hub)
+- **LLM runtime**: embedded GGUF models via `llama-cpp-python`, with optional headless Ollama backend
 - **Text-to-Speech**: `pyttsx3` (offline, OS-native voices)
 - **Mic capture**: PyAudio
 - **Persistence**: SQLite (user profile + conversation history)
@@ -140,7 +140,7 @@ JARVIN_VAD_RELEASE_MS=350
 JARVIN_VAD_HANGOVER_MS=200
 JARVIN_VAD_PRE_ROLL_MS=300
 
-# LLM (llama.cpp)
+# LLM
 JARVIN_MODELS_DIR=models
 JARVIN_LLM_BACKEND=llama_cpp
 JARVIN_LLM_AUTO_PROVISION=true
@@ -152,6 +152,10 @@ JARVIN_LLM_N_GPU_LAYERS=-1  # offload all possible layers to GPU
 JARVIN_LLM_VERBOSE=true
 JARVIN_LLM_LOG_SYSTEM_INFO=true
 JARVIN_LLM_REQUIRE_GPU=false
+
+# Optional headless Ollama backend
+JARVIN_OLLAMA_BASE_URL=http://127.0.0.1:11434
+JARVIN_OLLAMA_MODEL=
 
 # Persistence (SQLite-backed profile + conversations)
 JARVIN_DATA_DIR=./data
@@ -276,6 +280,20 @@ pip install --upgrade --force-reinstall torch==2.7.1+cu128 --index-url https://d
 ## llama.cpp on Windows
 
 See the NVIDIA GPU checklist above for the current Windows GPU path.
+
+Jarvin can also use a headless Ollama backend if you want a separate inference service process while keeping Jarvin's own UI and behavior.
+
+Example:
+
+```powershell
+$env:JARVIN_LLM_BACKEND = "ollama_http"
+$env:JARVIN_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+$env:JARVIN_OLLAMA_MODEL = "your-model-tag"
+python server.py
+```
+
+Jarvin will not auto-pull Ollama models for you.
+Provision the model yourself on the host machine if you use this backend.
 
 - Prefer **Conda** binaries to avoid compiling `llama-cpp-python`.  
 - If you compiled and it's slow, ensure it’s a **CPU build** (no GPU expected on this laptop) and that `n_threads` is sensible (auto by default).

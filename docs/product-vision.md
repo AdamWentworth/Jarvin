@@ -18,6 +18,7 @@ The long-term goal is closer to "my own Codex that can speak" than to "a single 
 - Safe execution boundaries: agent abilities should be explicit and toggleable, not always-on.
 - Text remains first-class: every voice interaction should still have a text representation for review, editing, and debugging.
 - Spoken output is optional: TTS should be a presentation layer, not a requirement for every reply.
+- The main host matters more than the clients: Jarvin should eventually be able to run on one trusted machine while lighter devices connect to it privately.
 
 ## Target Interaction Modes
 
@@ -59,6 +60,23 @@ Success looks like:
 - Model choice should be configurable per mode instead of being treated as a single global default forever.
 - ASR, LLM, and TTS settings should be profile-driven so the app can trade quality for latency deliberately.
 - The UI should eventually expose mode toggles instead of hiding everything behind one pipeline.
+- The app should be able to act as a private home-hosted service, with phones and other devices behaving as thin clients.
+
+## Deployment Direction
+
+The intended long-term deployment shape is:
+
+- one stronger host machine runs the Jarvin backend, models, and local data
+- other personal devices access Jarvin remotely over a private VPN
+- client hardware should matter very little because inference stays on the host
+- the service should be private-first and should not require exposing the app directly to the public internet
+
+This means future architecture decisions should favor:
+
+- stable local inference backends that can be hosted behind an HTTP API
+- clear authentication and trust boundaries
+- support for multiple clients and sessions
+- keeping heavy model/runtime dependencies on the host, not on every device
 
 ## Near-Term Decision Rule
 
