@@ -1,5 +1,5 @@
 import type { FormEvent, MouseEvent } from "react";
-import type { AudioDevicesResponse, LLMOptionsResponse, LiveSnapshot, UserProfilePayload } from "../lib/types";
+import type { AudioDevicesResponse, HealthResponse, LLMOptionsResponse, LiveSnapshot, UserProfilePayload } from "../lib/types";
 import {
   COMMUNICATION_STYLE_OPTIONS,
   INSPECTOR_SECTIONS,
@@ -7,6 +7,7 @@ import {
   RESPONSE_LENGTH_OPTIONS,
   type InspectorSection,
 } from "../lib/ui";
+import { stageLabel, type ConnectionState, type RemoteVoiceDiagnostics } from "../lib/runtime";
 
 type SettingsOverlayProps = {
   isOpen: boolean;
@@ -23,6 +24,7 @@ type SettingsOverlayProps = {
   activeInspectorSection: InspectorSection;
   onSectionChange: (section: InspectorSection) => void;
   onRefreshWorkspace: () => void;
+  onReconnectHost: () => void;
   llmOptions: LLMOptionsResponse | null;
   selectedBackend: string;
   selectedModel: string;
@@ -49,6 +51,14 @@ type SettingsOverlayProps = {
   latestReplyAudioReady: boolean;
   isReplyAudioPlaying: boolean;
   onPlayLatestReplyAudio: () => void;
+  connectionState: ConnectionState;
+  connectionSummary: string;
+  lastConnectionError: string;
+  lastSuccessfulContactLabel: string;
+  lastRoundTripMs: number | null;
+  isClientOnline: boolean;
+  health: HealthResponse | null;
+  remoteVoiceDiagnostics: RemoteVoiceDiagnostics;
   profile: UserProfilePayload;
   onProfileChange: (updater: (current: UserProfilePayload) => UserProfilePayload) => void;
   onSaveProfile: (event: FormEvent<HTMLFormElement>) => void;
@@ -71,6 +81,7 @@ export function SettingsOverlay({
   activeInspectorSection,
   onSectionChange,
   onRefreshWorkspace,
+  onReconnectHost,
   llmOptions,
   selectedBackend,
   selectedModel,
@@ -97,6 +108,14 @@ export function SettingsOverlay({
   latestReplyAudioReady,
   isReplyAudioPlaying,
   onPlayLatestReplyAudio,
+  connectionState,
+  connectionSummary,
+  lastConnectionError,
+  lastSuccessfulContactLabel,
+  lastRoundTripMs,
+  isClientOnline,
+  health,
+  remoteVoiceDiagnostics,
   profile,
   onProfileChange,
   onSaveProfile,
@@ -133,6 +152,9 @@ export function SettingsOverlay({
           <div className="settings-dialog-actions">
             <button type="button" className="ghost-button compact-button" onClick={onRefreshWorkspace}>
               Refresh
+            </button>
+            <button type="button" className="secondary-button compact-button" onClick={onReconnectHost}>
+              Reconnect
             </button>
             <button type="button" className="ghost-button compact-button" onClick={onClose}>
               Close
@@ -173,6 +195,10 @@ export function SettingsOverlay({
               <div className="overview-stat">
                 <span>Host</span>
                 <strong>{apiBaseUrl}</strong>
+              </div>
+              <div className="overview-stat">
+                <span>Connection</span>
+                <strong>{connectionSummary}</strong>
               </div>
               <div className="overview-stat">
                 <span>Listener</span>
@@ -302,7 +328,7 @@ export function SettingsOverlay({
                     onClick={onPlayLatestReplyAudio}
                     disabled={!latestReplyAudioReady}
                   >
-                    {isReplyAudioPlaying ? "Replay latest reply" : "Play latest reply"}
+                    {isReplyAudioPlaying ? "Stop playback" : "Play latest reply"}
                   </button>
                 </div>
 
@@ -448,6 +474,26 @@ export function SettingsOverlay({
 
               <div className="overview-grid diagnostic-grid">
                 <div className="overview-stat">
+                  <span>Host connection</span>
+                  <strong>{connectionSummary} | {connectionState}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Last contact</span>
+                  <strong>{lastSuccessfulContactLabel}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Latency</span>
+                  <strong>{lastRoundTripMs !== null ? `${lastRoundTripMs} ms` : "Waiting for ping"}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Client network</span>
+                  <strong>{isClientOnline ? "Online" : "Offline"}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Health probe</span>
+                  <strong>{health ? `${health.status} | listener ${health.listening ? "up" : "down"}` : "Unknown"}</strong>
+                </div>
+                <div className="overview-stat">
                   <span>Listener state</span>
                   <strong>{currentListenerStatus}</strong>
                 </div>
@@ -465,6 +511,30 @@ export function SettingsOverlay({
                     {live?.cycle_ms ? `${live.cycle_ms} ms cycle` : "Waiting for activity"}
                     {live?.utter_ms ? ` | ${live.utter_ms} ms utterance` : ""}
                   </strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Mic capture</span>
+                  <strong>{stageLabel(remoteVoiceDiagnostics.microphone)}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Upload</span>
+                  <strong>{stageLabel(remoteVoiceDiagnostics.upload)}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Transcription</span>
+                  <strong>{stageLabel(remoteVoiceDiagnostics.transcription)}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Chat round-trip</span>
+                  <strong>{stageLabel(remoteVoiceDiagnostics.chat)}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Reply playback</span>
+                  <strong>{stageLabel(remoteVoiceDiagnostics.playback)}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>Last voice note</span>
+                  <strong>{remoteVoiceDiagnostics.note || lastConnectionError || "No recent remote voice events."}</strong>
                 </div>
               </div>
             </section>

@@ -45,6 +45,11 @@ export interface TranscribeResponse {
   transcribed_text: string;
 }
 
+export interface HealthResponse {
+  status: string;
+  listening: boolean;
+}
+
 export interface StatusResponse {
   listening: boolean;
   error?: string;

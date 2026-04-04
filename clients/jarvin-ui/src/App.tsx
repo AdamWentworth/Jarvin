@@ -1,7 +1,7 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import "./App.chrome.css";
 import {
-  ApiError,
   activateConversation,
   applyLlmSelection,
   buildApiUrl,
@@ -11,6 +11,7 @@ import {
   deleteConversation,
   getApiBaseUrl,
   getAudioDevices,
+  getHealth,
   getLive,
   getLlmOptions,
   getStoredApiBaseUrl,
@@ -24,18 +25,16 @@ import {
   shutdownHost,
   startListener,
   stopListener,
-  transcribeAudioBlob,
 } from "./lib/api";
 import type {
   AudioDevicesResponse,
   ConversationSummary,
   ConversationTurn,
-  ConversationWorkspaceResponse,
+  HealthResponse,
   LLMOptionsResponse,
   LiveSnapshot,
   StatusResponse,
   UserProfilePayload,
-  WorkspaceBootstrapResponse,
 } from "./lib/types";
 import {
   DEFAULT_PROFILE,
@@ -45,82 +44,26 @@ import {
   type InspectorSection,
   type ReasoningEffort,
 } from "./lib/ui";
+import {
+  DEFAULT_REMOTE_VOICE_DIAGNOSTICS,
+  connectionLabel,
+  detectRemoteVoiceCapability,
+  finalizeRemoteRecording,
+  formatTimestamp,
+  getStoredChatDraft,
+  getStoredSpeakRepliesPreference,
+  setStoredChatDraft,
+  setStoredSpeakRepliesPreference,
+  stopRemoteStream,
+  type ConnectionState,
+  type RemoteVoiceDiagnostics,
+  type SendSource,
+  withRecorderStop,
+} from "./lib/runtime";
 import { ConversationSidebar } from "./components/ConversationSidebar";
 import { ChatWorkspace } from "./components/ChatWorkspace";
 import { SettingsOverlay } from "./components/SettingsOverlay";
-
-function describeError(error: unknown): string {
-  if (error instanceof ApiError) {
-    return error.message;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "Something went wrong.";
-}
-
-function syncWorkspaceState(
-  setConversations: (items: ConversationSummary[]) => void,
-  setActiveConversationId: (id: number | null) => void,
-  setHistory: (items: ConversationTurn[]) => void,
-  data: ConversationWorkspaceResponse | WorkspaceBootstrapResponse,
-) {
-  setConversations(data.conversations);
-  setActiveConversationId(data.active_conversation_id);
-  setHistory(data.history);
-}
-
-type RemoteVoiceCapability = {
-  available: boolean;
-  reason: string;
-};
-
-function detectRemoteVoiceCapability(): RemoteVoiceCapability {
-  if (typeof window === "undefined") {
-    return { available: false, reason: "Remote microphone capture is only available in a browser or app shell." };
-  }
-
-  if (!window.isSecureContext) {
-    return { available: false, reason: "Remote microphone capture needs HTTPS or a Tauri mobile shell." };
-  }
-
-  if (!navigator.mediaDevices?.getUserMedia) {
-    return { available: false, reason: "This client does not expose microphone access." };
-  }
-
-  if (typeof MediaRecorder === "undefined") {
-    return { available: false, reason: "This client does not support in-browser audio recording." };
-  }
-
-  return { available: true, reason: "" };
-}
-
-const SPEAK_REPLIES_STORAGE_KEY = "jarvin.speakRepliesOnDevice";
-
-function detectMobileClient(): boolean {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-  return /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-}
-
-function getStoredSpeakRepliesPreference(): boolean {
-  if (typeof window === "undefined" || typeof window.localStorage === "undefined") {
-    return detectMobileClient();
-  }
-
-  const raw = window.localStorage.getItem(SPEAK_REPLIES_STORAGE_KEY);
-  if (raw === null) {
-    return detectMobileClient();
-  }
-  return raw === "true";
-}
-
-function setStoredSpeakRepliesPreference(value: boolean) {
-  if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
-    window.localStorage.setItem(SPEAK_REPLIES_STORAGE_KEY, String(value));
-  }
-}
+import { describeError, syncWorkspaceState } from "./lib/workspace";
 
 function App() {
   const [profile, setProfile] = useState<UserProfilePayload>(DEFAULT_PROFILE);
@@ -135,9 +78,15 @@ function App() {
   const [audioDevices, setAudioDevices] = useState<AudioDevicesResponse | null>(null);
   const [selectedDeviceIndex, setSelectedDeviceIndex] = useState<number | "">("");
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [live, setLive] = useState<LiveSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [isClientOnline, setIsClientOnline] = useState<boolean>(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
+  const [lastConnectionError, setLastConnectionError] = useState("");
+  const [lastSuccessfulContactAt, setLastSuccessfulContactAt] = useState<string | null>(null);
+  const [lastRoundTripMs, setLastRoundTripMs] = useState<number | null>(null);
   const [connectionError, setConnectionError] = useState("");
   const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState<string>(() => getStoredApiBaseUrl() ?? getApiBaseUrl());
   const [apiBaseUrlStatus, setApiBaseUrlStatus] = useState("");
@@ -150,6 +99,7 @@ function App() {
   const [profileStatus, setProfileStatus] = useState("");
   const [deviceStatus, setDeviceStatus] = useState("");
   const [remoteVoiceStatus, setRemoteVoiceStatus] = useState("");
+  const [remoteVoiceDiagnostics, setRemoteVoiceDiagnostics] = useState<RemoteVoiceDiagnostics>(DEFAULT_REMOTE_VOICE_DIAGNOSTICS);
   const [isRemoteRecording, setIsRemoteRecording] = useState(false);
   const [isRemoteTranscribing, setIsRemoteTranscribing] = useState(false);
   const [openConversationMenuId, setOpenConversationMenuId] = useState<number | null>(null);
@@ -159,6 +109,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const lastLiveSeq = useRef<number | null>(null);
+  const consecutivePollFailuresRef = useRef(0);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -173,6 +124,28 @@ function App() {
   const currentListenerStatus = useMemo(
     () => statusLabel(status, live),
     [status, live],
+  );
+
+  const connectionSummary = useMemo(() => {
+    if (!isClientOnline) {
+      return "Client device is offline";
+    }
+    const base = connectionLabel(connectionState);
+    if (connectionState === "connected") {
+      if (lastRoundTripMs !== null) {
+        return `${base} • ${lastRoundTripMs} ms`;
+      }
+      return base;
+    }
+    if (lastConnectionError) {
+      return `${base} • ${lastConnectionError}`;
+    }
+    return base;
+  }, [connectionState, isClientOnline, lastConnectionError, lastRoundTripMs]);
+
+  const lastSuccessfulContactLabel = useMemo(
+    () => formatTimestamp(lastSuccessfulContactAt),
+    [lastSuccessfulContactAt],
   );
 
   const chatMode = useMemo(
@@ -196,14 +169,20 @@ function App() {
     setProfile(workspace.profile);
   }
 
-  async function refreshWorkspace() {
-    setLoading(true);
+  async function refreshWorkspace(options?: { withLoading?: boolean; reason?: "initial" | "manual" | "reconnect" }) {
+    const withLoading = options?.withLoading ?? true;
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (withLoading) {
+      setLoading(true);
+    }
+    setConnectionState(options?.reason === "reconnect" ? "degraded" : "connecting");
     setConnectionError("");
     try {
-      const [workspace, llm, devices, currentStatus, currentLive] = await Promise.all([
+      const [workspace, llm, devices, currentHealth, currentStatus, currentLive] = await Promise.all([
         getWorkspaceBootstrap(),
         getLlmOptions(),
         getAudioDevices(),
+        getHealth(),
         getStatus(),
         getLive(),
       ]);
@@ -216,20 +195,31 @@ function App() {
       setLlmStatus(llm.message ?? "");
       setAudioDevices(devices);
       setSelectedDeviceIndex(devices.selected_index ?? "");
+      setHealth(currentHealth);
       setStatus(currentStatus);
       setLive(currentLive);
       lastLiveSeq.current = currentLive.seq ?? null;
       setChatStatus("");
       setApiBaseUrlStatus("");
+      setConnectionState("connected");
+      setLastConnectionError("");
+      setLastSuccessfulContactAt(new Date().toISOString());
+      setLastRoundTripMs(Math.max(1, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)));
+      consecutivePollFailuresRef.current = 0;
     } catch (error) {
-      setConnectionError(describeError(error));
+      const message = describeError(error);
+      setConnectionError(message);
+      setLastConnectionError(message);
+      setConnectionState("offline");
     } finally {
-      setLoading(false);
+      if (withLoading) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
-    void refreshWorkspace();
+    void refreshWorkspace({ withLoading: true, reason: "initial" });
   }, []);
 
   useEffect(() => {
@@ -241,6 +231,31 @@ function App() {
       setSelectedModel(available[0] ?? "");
     }
   }, [llmOptions, modelChoices, selectedModel]);
+
+  useEffect(() => {
+    setChatInput(getStoredChatDraft(activeConversationId));
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    setStoredChatDraft(activeConversationId, chatInput);
+  }, [activeConversationId, chatInput]);
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsClientOnline(true);
+    }
+
+    function handleOffline() {
+      setIsClientOnline(false);
+    }
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     const node = messageListRef.current;
@@ -291,9 +306,16 @@ function App() {
   useEffect(() => {
     const poll = window.setInterval(async () => {
       try {
-        const [currentStatus, currentLive] = await Promise.all([getStatus(), getLive()]);
+        const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const [currentHealth, currentStatus, currentLive] = await Promise.all([getHealth(), getStatus(), getLive()]);
+        setHealth(currentHealth);
         setStatus(currentStatus);
         setLive(currentLive);
+        setConnectionState("connected");
+        setLastConnectionError("");
+        setLastSuccessfulContactAt(new Date().toISOString());
+        setLastRoundTripMs(Math.max(1, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)));
+        consecutivePollFailuresRef.current = 0;
 
         const nextSeq = currentLive.seq ?? null;
         if (
@@ -308,8 +330,10 @@ function App() {
         } else {
           lastLiveSeq.current = nextSeq;
         }
-      } catch {
-        // Keep the desktop shell responsive if the host is briefly unavailable.
+      } catch (error) {
+        consecutivePollFailuresRef.current += 1;
+        setLastConnectionError(describeError(error));
+        setConnectionState(consecutivePollFailuresRef.current >= 3 ? "offline" : "degraded");
       }
     }, 1000);
 
@@ -332,6 +356,17 @@ function App() {
     };
   }, []);
 
+  function setRemoteVoiceStage<K extends keyof RemoteVoiceDiagnostics>(
+    key: K,
+    value: RemoteVoiceDiagnostics[K],
+  ) {
+    setRemoteVoiceDiagnostics((current) => ({ ...current, [key]: value }));
+  }
+
+  function resetRemoteVoiceDiagnostics(note = "") {
+    setRemoteVoiceDiagnostics({ ...DEFAULT_REMOTE_VOICE_DIAGNOSTICS, note });
+  }
+
   async function playReplyAudio(url: string) {
     const absoluteUrl = buildApiUrl(url);
     const currentAudio = replyAudioRef.current;
@@ -347,22 +382,38 @@ function App() {
     audio.onended = () => {
       setIsReplyAudioPlaying(false);
       setReplyAudioStatus("");
+      setRemoteVoiceStage("playback", "done");
     };
 
     audio.onerror = () => {
       setIsReplyAudioPlaying(false);
       setReplyAudioStatus("Reply audio could not be played on this device.");
+      setRemoteVoiceStage("playback", "error");
     };
 
     try {
       setIsReplyAudioPlaying(true);
       setReplyAudioStatus("Playing Jarvin's reply...");
+      setRemoteVoiceStage("playback", "working");
       await audio.play();
     } catch (error) {
       setIsReplyAudioPlaying(false);
       setReplyAudioStatus(describeError(error) || "Reply audio is ready. Tap play to hear it.");
+      setRemoteVoiceStage("playback", "error");
       throw error;
     }
+  }
+
+  function stopReplyAudio() {
+    const audio = replyAudioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.pause();
+    audio.currentTime = 0;
+    setIsReplyAudioPlaying(false);
+    setReplyAudioStatus("Reply playback stopped.");
+    setRemoteVoiceStage("playback", "idle");
   }
 
   function handleToggleSpeakRepliesOnThisDevice() {
@@ -370,19 +421,24 @@ function App() {
       const next = !current;
       setStoredSpeakRepliesPreference(next);
       if (!next) {
-        const audio = replyAudioRef.current;
-        if (audio) {
-          audio.pause();
-          audio.currentTime = 0;
-        }
-        setIsReplyAudioPlaying(false);
+        stopReplyAudio();
       }
       setReplyAudioStatus(next ? "Jarvin will speak replies on this device when audio is available." : "");
       return next;
     });
   }
 
+  async function handleReconnectHost() {
+    setApiBaseUrlStatus("Reconnecting to the Jarvin host...");
+    await refreshWorkspace({ withLoading: false, reason: "reconnect" });
+  }
+
   async function handlePlayLatestReplyAudio() {
+    if (isReplyAudioPlaying) {
+      stopReplyAudio();
+      return;
+    }
+
     if (!latestReplyAudioUrl) {
       setReplyAudioStatus("No reply audio is ready yet.");
       return;
@@ -493,10 +549,24 @@ function App() {
     }
   }
 
-  async function handleSendMessage(rawText?: string) {
+  async function handleSendMessage(rawText?: string, source: SendSource = "typed") {
     const text = (rawText ?? chatInput).trim();
     if (!text || sending) {
       return;
+    }
+
+    if (source === "typed") {
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        chat: "working",
+        note: "Sending typed message to the host.",
+      }));
+    } else {
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        chat: "working",
+        note: "Sending transcribed speech to the host chat endpoint.",
+      }));
     }
 
     let conversationId = activeConversationId;
@@ -506,6 +576,8 @@ function App() {
         syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
         conversationId = workspace.active_conversation_id;
       } catch (error) {
+        setRemoteVoiceStage("chat", "error");
+        setRemoteVoiceDiagnostics((current) => ({ ...current, note: "Could not create a conversation for the new message." }));
         setChatStatus(describeError(error));
         return;
       }
@@ -540,6 +612,7 @@ function App() {
       }
       if (response.tts_url) {
         setLatestReplyAudioUrl(response.tts_url);
+        setRemoteVoiceStage("chat", "done");
         if (speakRepliesOnThisDevice) {
           try {
             await playReplyAudio(response.tts_url);
@@ -548,13 +621,22 @@ function App() {
           }
         } else {
           setReplyAudioStatus("Reply audio is ready.");
+          setRemoteVoiceStage("playback", "done");
         }
       } else {
         setLatestReplyAudioUrl(null);
         setReplyAudioStatus(speakRepliesOnThisDevice ? "Reply audio was not available for this response." : "");
+        setRemoteVoiceStage("chat", "done");
+        setRemoteVoiceStage("playback", speakRepliesOnThisDevice ? "error" : "idle");
       }
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        note: source === "remote_voice" ? "Remote speech completed its round trip." : "Typed message completed successfully.",
+      }));
       setChatStatus("");
     } catch (error) {
+      setRemoteVoiceStage("chat", "error");
+      setRemoteVoiceDiagnostics((current) => ({ ...current, note: describeError(error) }));
       setChatStatus(describeError(error));
     } finally {
       setSending(false);
@@ -637,7 +719,7 @@ function App() {
       const next = setStoredApiBaseUrl(apiBaseUrlDraft);
       setApiBaseUrlDraft(next);
       setApiBaseUrlStatus("Saved host URL. Trying connection...");
-      await refreshWorkspace();
+      await refreshWorkspace({ withLoading: false, reason: "reconnect" });
     } catch (error) {
       setApiBaseUrlStatus(describeError(error));
     }
@@ -648,7 +730,7 @@ function App() {
     const next = getApiBaseUrl();
     setApiBaseUrlDraft(next);
     setApiBaseUrlStatus("Using the default host URL again.");
-    await refreshWorkspace();
+    await refreshWorkspace({ withLoading: false, reason: "reconnect" });
   }
 
   async function handleRemoteVoiceToggle() {
@@ -697,14 +779,19 @@ function App() {
           setIsRemoteRecording,
           setIsRemoteTranscribing,
           setRemoteVoiceStatus,
-          sendMessage: (text) => handleSendMessage(text),
+          setRemoteVoiceDiagnostics,
+          sendMessage: (text) => handleSendMessage(text, "remote_voice"),
         });
       };
 
+      resetRemoteVoiceDiagnostics("Listening for speech on this device.");
+      setRemoteVoiceStage("microphone", "working");
       recorder.start();
       setRemoteVoiceStatus("Listening on this device. Tap again to send.");
       setIsRemoteRecording(true);
     } catch (error) {
+      setRemoteVoiceStage("microphone", "error");
+      setRemoteVoiceDiagnostics((current) => ({ ...current, note: describeError(error) }));
       setRemoteVoiceStatus(describeError(error) || "Microphone permission was denied.");
     }
   }
@@ -754,7 +841,7 @@ function App() {
             <button type="button" className="secondary-button" onClick={() => void handleSaveApiBaseUrl()}>
               Save host
             </button>
-            <button type="button" className="primary-button" onClick={() => void refreshWorkspace()}>
+            <button type="button" className="primary-button" onClick={() => void refreshWorkspace({ withLoading: true, reason: "reconnect" })}>
               Retry connection
             </button>
             <button type="button" className="ghost-button" onClick={() => void handleClearApiBaseUrlOverride()}>
@@ -806,6 +893,9 @@ function App() {
           history={history}
           messageListRef={messageListRef}
           chatStatus={chatStatus}
+          connectionState={connectionState}
+          connectionSummary={connectionSummary}
+          lastConnectionError={lastConnectionError}
           replyAudioStatus={replyAudioStatus}
           latestReplyAudioReady={Boolean(latestReplyAudioUrl)}
           isReplyAudioPlaying={isReplyAudioPlaying}
@@ -836,6 +926,7 @@ function App() {
           onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
           onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
           onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}
+          onReconnectHost={() => void handleReconnectHost()}
           onOpenConversationSidebar={() => setIsMobileSidebarOpen(true)}
           onOpenSettings={() => {
             setActiveInspectorSection("assistant");
@@ -858,7 +949,8 @@ function App() {
         currentBackend={llmOptions?.current_backend ?? "Unknown"}
         activeInspectorSection={activeInspectorSection}
         onSectionChange={setActiveInspectorSection}
-        onRefreshWorkspace={() => void refreshWorkspace()}
+        onRefreshWorkspace={() => void refreshWorkspace({ withLoading: false, reason: "manual" })}
+        onReconnectHost={() => void handleReconnectHost()}
         llmOptions={llmOptions}
         selectedBackend={selectedBackend}
         selectedModel={selectedModel}
@@ -885,6 +977,14 @@ function App() {
         latestReplyAudioReady={Boolean(latestReplyAudioUrl)}
         isReplyAudioPlaying={isReplyAudioPlaying}
         onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
+        connectionState={connectionState}
+        connectionSummary={connectionSummary}
+        lastConnectionError={lastConnectionError}
+        lastSuccessfulContactLabel={lastSuccessfulContactLabel}
+        lastRoundTripMs={lastRoundTripMs}
+        isClientOnline={isClientOnline}
+        health={health}
+        remoteVoiceDiagnostics={remoteVoiceDiagnostics}
         profile={profile}
         onProfileChange={setProfile}
         onSaveProfile={(event) => void handleSaveProfile(event)}
@@ -896,75 +996,3 @@ function App() {
 }
 
 export default App;
-
-function withRecorderStop(recorder: MediaRecorder) {
-  try {
-    recorder.stop();
-  } catch {
-    // ignore invalid stop calls during teardown
-  }
-}
-
-function stopRemoteStream(streamRef: MutableRefObject<MediaStream | null>) {
-  const stream = streamRef.current;
-  if (stream) {
-    for (const track of stream.getTracks()) {
-      track.stop();
-    }
-  }
-  streamRef.current = null;
-}
-
-async function finalizeRemoteRecording({
-  mediaChunksRef,
-  mediaRecorderRef,
-  mediaStreamRef,
-  setIsRemoteRecording,
-  setIsRemoteTranscribing,
-  setRemoteVoiceStatus,
-  sendMessage,
-}: {
-  mediaChunksRef: MutableRefObject<Blob[]>;
-  mediaRecorderRef: MutableRefObject<MediaRecorder | null>;
-  mediaStreamRef: MutableRefObject<MediaStream | null>;
-  setIsRemoteRecording: (value: boolean) => void;
-  setIsRemoteTranscribing: (value: boolean) => void;
-  setRemoteVoiceStatus: (value: string) => void;
-  sendMessage: (text: string) => Promise<void>;
-}) {
-  const recorder = mediaRecorderRef.current;
-  const mimeType = recorder?.mimeType || mediaChunksRef.current[0]?.type || "audio/webm";
-  const blob = new Blob(mediaChunksRef.current, { type: mimeType });
-
-  mediaRecorderRef.current = null;
-  mediaChunksRef.current = [];
-  setIsRemoteRecording(false);
-  stopRemoteStream(mediaStreamRef);
-
-  if (blob.size === 0) {
-    setRemoteVoiceStatus("No remote audio was captured.");
-    return;
-  }
-
-  try {
-    setIsRemoteTranscribing(true);
-    setRemoteVoiceStatus("Transcribing remote audio...");
-    const response = await transcribeAudioBlob(blob, `remote-input.${mimeType.includes("mp4") ? "m4a" : "webm"}`);
-    const text = response.transcribed_text.trim();
-    if (!text) {
-      setRemoteVoiceStatus("No speech detected in the remote audio.");
-      return;
-    }
-
-    setRemoteVoiceStatus(`Heard: ${text}`);
-    await sendMessage(text);
-  } catch (error) {
-    if (error instanceof Error && error.message) {
-      setRemoteVoiceStatus(error.message);
-    } else {
-      setRemoteVoiceStatus("Remote voice input failed.");
-    }
-  } finally {
-    setIsRemoteTranscribing(false);
-  }
-}

@@ -4,6 +4,7 @@ import type {
   ChatMode,
   ChatResponse,
   ConversationWorkspaceResponse,
+  HealthResponse,
   LLMOptionsResponse,
   LiveSnapshot,
   StatusResponse,
@@ -156,6 +157,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getWorkspaceBootstrap() {
   return requestJson<WorkspaceBootstrapResponse>("/workspace/bootstrap");
+}
+
+export function getHealth() {
+  return requestJson<HealthResponse>("/healthz");
 }
 
 export function getStatus() {

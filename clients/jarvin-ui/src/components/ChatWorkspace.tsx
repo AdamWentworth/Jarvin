@@ -2,12 +2,16 @@ import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { Bars3Icon, Cog6ToothIcon, MicrophoneIcon, SpeakerWaveIcon, StopIcon } from "@heroicons/react/20/solid";
 import type { Choice, ConversationTurn } from "../lib/types";
 import type { ReasoningEffort } from "../lib/ui";
+import type { ConnectionState } from "../lib/runtime";
 
 type ChatWorkspaceProps = {
   activeConversationTitle: string;
   history: ConversationTurn[];
   messageListRef: RefObject<HTMLDivElement | null>;
   chatStatus: string;
+  connectionState: ConnectionState;
+  connectionSummary: string;
+  lastConnectionError: string;
   replyAudioStatus: string;
   latestReplyAudioReady: boolean;
   isReplyAudioPlaying: boolean;
@@ -38,6 +42,7 @@ type ChatWorkspaceProps = {
   onToggleRemoteVoice: () => void;
   onPlayLatestReplyAudio: () => void;
   onToggleSpeakRepliesOnThisDevice: () => void;
+  onReconnectHost: () => void;
   onOpenSettings: () => void;
   onOpenConversationSidebar: () => void;
 };
@@ -47,6 +52,9 @@ export function ChatWorkspace({
   history,
   messageListRef,
   chatStatus,
+  connectionState,
+  connectionSummary,
+  lastConnectionError,
   replyAudioStatus,
   latestReplyAudioReady,
   isReplyAudioPlaying,
@@ -77,6 +85,7 @@ export function ChatWorkspace({
   onToggleRemoteVoice,
   onPlayLatestReplyAudio,
   onToggleSpeakRepliesOnThisDevice,
+  onReconnectHost,
   onOpenSettings,
   onOpenConversationSidebar,
 }: ChatWorkspaceProps) {
@@ -152,6 +161,18 @@ export function ChatWorkspace({
         </div>
 
         <footer className="composer-shell">
+          {connectionState !== "connected" ? (
+            <div className={`connection-banner connection-${connectionState}`}>
+              <div className="connection-banner-copy">
+                <strong>{connectionSummary}</strong>
+                <span>{lastConnectionError || "The client is waiting for the Jarvin host."}</span>
+              </div>
+              <button type="button" className="secondary-button compact-button" onClick={onReconnectHost}>
+                Reconnect
+              </button>
+            </div>
+          ) : null}
+
           {chatStatus || remoteVoiceStatus || replyAudioStatus || latestReplyAudioReady ? (
             <div className="composer-status-row">
               {chatStatus ? <p className="composer-status">{chatStatus}</p> : null}
@@ -164,7 +185,7 @@ export function ChatWorkspace({
                   onClick={onPlayLatestReplyAudio}
                 >
                   <SpeakerWaveIcon aria-hidden="true" />
-                  {isReplyAudioPlaying ? "Replay" : "Play reply"}
+                  {isReplyAudioPlaying ? "Stop playback" : "Play reply"}
                 </button>
               ) : null}
             </div>
