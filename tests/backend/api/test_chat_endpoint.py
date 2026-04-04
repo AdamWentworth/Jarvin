@@ -191,3 +191,57 @@ async def test_chat_endpoint_can_include_tts_url(monkeypatch):
 
     assert resp.reply == "spoken reply"
     assert resp.tts_url == "/_temp/tts_test.wav"
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_can_handle_tool_commands(monkeypatch):
+    calls = {"append": [], "generate_reply": 0}
+
+    monkeypatch.setattr(chat_mod, "get_user_profile", lambda: {}, raising=True)
+    monkeypatch.setattr(chat_mod, "get_conversation_history", lambda conversation_id=None: [], raising=True)
+    monkeypatch.setattr(
+        chat_mod,
+        "append_turn",
+        lambda role, message, conversation_id=None: calls["append"].append((role, message, conversation_id)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_mod,
+        "generate_reply",
+        lambda text, cfg=None, context=None: calls.__setitem__("generate_reply", calls["generate_reply"] + 1) or "should not happen",
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_mod,
+        "maybe_handle_assistant_tool_request",
+        lambda text: type("ToolReply", (), {"handled": True, "reply": "Search results for `todo`: ..."})(),
+        raising=True,
+    )
+
+    resp = await chat_mod.chat_endpoint(ChatRequest(user_text="/tool search todo"))
+
+    assert resp.reply == "Search results for `todo`: ..."
+    assert resp.mode_used == "agent_tool"
+    assert calls["generate_reply"] == 0
+    assert calls["append"][0][0] == "user"
+    assert calls["append"][1][0] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_can_speak_tool_command_replies(monkeypatch):
+    monkeypatch.setattr(chat_mod, "get_user_profile", lambda: {}, raising=True)
+    monkeypatch.setattr(chat_mod, "get_conversation_history", lambda conversation_id=None: [], raising=True)
+    monkeypatch.setattr(chat_mod, "append_turn", lambda role, message, conversation_id=None: None, raising=True)
+    monkeypatch.setattr(
+        chat_mod,
+        "maybe_handle_assistant_tool_request",
+        lambda text: type("ToolReply", (), {"handled": True, "reply": "Weather for Seattle"})(),
+        raising=True,
+    )
+    monkeypatch.setattr(chat_mod, "synth_to_wav", lambda text: r"D:\Projects\Jarvin\temp\tts_tool.wav", raising=True)
+
+    resp = await chat_mod.chat_endpoint(ChatRequest(user_text="/tool weather Seattle", speak_reply=True))
+
+    assert resp.reply == "Weather for Seattle"
+    assert resp.mode_used == "agent_tool"
+    assert resp.tts_url == "/_temp/tts_tool.wav"

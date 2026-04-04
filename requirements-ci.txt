@@ -19,6 +19,9 @@ python-multipart==0.0.9
 # For frontend
 gradio==4.44.1
 requests==2.32.3
+google-api-python-client==2.179.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.2
 
 # For model provisioning from Hugging Face Hub
 huggingface-hub==0.25.2

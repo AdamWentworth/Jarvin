@@ -771,11 +771,13 @@ code {
 .remote-voice-button {
   background: rgba(32, 36, 43, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  touch-action: none;
 }
 
 .remote-voice-button.recording {
   background: linear-gradient(180deg, var(--danger) 0%, var(--danger-hover) 100%);
   color: #fff3f2;
+  box-shadow: 0 0 0 1px rgba(255, 123, 94, 0.32), 0 10px 24px rgba(124, 28, 16, 0.34);
 }
 
 .reply-audio-toggle-button.active {

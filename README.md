@@ -12,6 +12,7 @@ Local, privacy-first voice assistant inspired by J.A.R.V.I.S. It runs entirely o
 - **Auto-provision** of a GGUF model from Hugging Face based on hardware (configurable)
 - **Conversation memory** backed by SQLite (user profile + multi-conversation history)
 - **Per-device microphone selection** via HTTP API and UI
+- **Host-side assistant tools** for repo search, safe command execution, weather lookups, and external-service hooks
 - Clean logging, voice-triggered shutdown intents, and graceful process shutdowns
 
 > Wake word / hotword detection and higher-quality neural TTS voices are not implemented yet.
@@ -334,8 +335,37 @@ To reset all memory, delete the SQLite file or use the UI to clear conversations
 - `GET /live` – latest transcript/reply, timing metrics, and flags (`recording`, `processing`), plus TTS URL
 - `POST /transcribe` – one-off file transcription (multipart upload)
 - `POST /chat` – stateless chat via local LLM, with optional profile/history context
+- `GET /agent/tools` – list the enabled host-side tool commands and capabilities
+- `POST /agent/tools/list` – list files under the configured workspace root
+- `POST /agent/tools/search` – repo text search
+- `POST /agent/tools/read` – read a file snippet
+- `POST /agent/tools/write` – write or append a file under the workspace root
+- `POST /agent/tools/run` – run an allowlisted local command
 - `GET /audio/devices` – list input-capable audio devices and current selection
 - `POST /audio/select` – validate/select input device, optionally restart listener
+
+### Chat Tool Commands
+
+Jarvin can also execute explicit host-side assistant actions from chat when you start a message with `/tool`:
+
+- `/tool help`
+- `/tool ls backend`
+- `/tool search llm_backend`
+- `/tool read backend/api/app.py 1 80`
+- `/tool run git status`
+- `/tool weather Seattle`
+- `/tool web local llama cpp docs`
+- `/tool calendar 7`
+
+Weather works immediately with Open-Meteo.
+
+Google Calendar requires an OAuth desktop client JSON saved at `secrets/google-calendar-client.json`, then run:
+
+```text
+/tool calendar auth
+```
+
+Google web search is only available if the host is configured with legacy Programmable Search / Custom Search JSON API credentials. Otherwise use `/tool web ...` with the default provider.
 
 ### Scripts
 

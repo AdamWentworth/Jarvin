@@ -44,6 +44,8 @@ type SettingsOverlayProps = {
   remoteVoiceStatus: string;
   isRemoteRecording: boolean;
   isRemoteTranscribing: boolean;
+  remoteRecordingElapsedLabel: string;
+  remoteVoicePressToTalk: boolean;
   onToggleRemoteVoice: () => void;
   speakRepliesOnThisDevice: boolean;
   onToggleSpeakRepliesOnThisDevice: () => void;
@@ -101,6 +103,8 @@ export function SettingsOverlay({
   remoteVoiceStatus,
   isRemoteRecording,
   isRemoteTranscribing,
+  remoteRecordingElapsedLabel,
+  remoteVoicePressToTalk,
   onToggleRemoteVoice,
   speakRepliesOnThisDevice,
   onToggleSpeakRepliesOnThisDevice,
@@ -284,7 +288,11 @@ export function SettingsOverlay({
               <section className="nested-panel">
                 <div className="section-copy">
                   <h3>Remote client microphone</h3>
-                  <p>Use the microphone on this device for push-to-talk input. This is separate from the host machine microphones.</p>
+                  <p>
+                    {remoteVoicePressToTalk
+                      ? "Hold the microphone button on this device to talk, then release to send. This is separate from the host machine microphones."
+                      : "Use the microphone on this device for push-to-talk input. This is separate from the host machine microphones."}
+                  </p>
                 </div>
 
                 <div className="button-row">
@@ -295,7 +303,13 @@ export function SettingsOverlay({
                     disabled={!remoteVoiceAvailable || isRemoteTranscribing}
                     title={remoteVoiceAvailable ? "Use this device microphone" : remoteVoiceDisabledReason}
                   >
-                    {isRemoteTranscribing ? "Transcribing..." : isRemoteRecording ? "Stop and send" : "Record from this device"}
+                    {isRemoteTranscribing
+                      ? "Transcribing..."
+                      : isRemoteRecording
+                        ? `Recording ${remoteRecordingElapsedLabel}`
+                        : remoteVoicePressToTalk
+                          ? "Hold to talk"
+                          : "Record from this device"}
                   </button>
                 </div>
 

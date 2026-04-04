@@ -7,6 +7,7 @@ import os
 from fastapi import APIRouter
 
 from backend.api.schemas import ChatRequest, ChatResponse, ErrorResponse
+from backend.agent.chat_tools import maybe_handle_assistant_tool_request
 from backend.ai_engine import build_context, build_jarvin_config, generate_reply
 from backend.tts.engine import synth_to_wav
 from memory.conversation import (
@@ -27,6 +28,29 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
     text = (payload.user_text or "").strip()
     if not text:
         return ErrorResponse(error="empty user_text")
+
+    try:
+        tool_response = maybe_handle_assistant_tool_request(text)
+    except Exception as exc:
+        log.exception("Tool command failed: %s", exc)
+        return ErrorResponse(error=str(exc))
+
+    if tool_response.handled:
+        tts_url = None
+        if payload.speak_reply and tool_response.reply.strip():
+            try:
+                tts_path = await asyncio.to_thread(synth_to_wav, tool_response.reply)
+                tts_url = f"/_temp/{os.path.basename(tts_path)}"
+            except Exception as exc:
+                log.exception("Tool reply speech synthesis failed: %s", exc)
+        append_turn("user", text, conversation_id=payload.conversation_id)
+        append_turn("assistant", tool_response.reply, conversation_id=payload.conversation_id)
+        return ChatResponse(
+            reply=tool_response.reply,
+            mode_used="agent_tool",
+            conversation_id=payload.conversation_id,
+            tts_url=tts_url,
+        )
 
     cfg = build_jarvin_config(
         mode=payload.mode,

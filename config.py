@@ -112,6 +112,24 @@ class Settings(BaseSettings):
     llm_log_system_info: bool = True
     llm_require_gpu: bool = False
 
+    # ---- Agent / local tools ----
+    agent_tools_enabled: bool = True
+    agent_workspace_root: str = "."
+    agent_allow_file_writes: bool = True
+    agent_allow_command_execution: bool = True
+    agent_command_timeout_sec: float = 20.0
+    agent_max_file_read_lines: int = 400
+    agent_max_search_results: int = 100
+    agent_web_search_provider: str = "duckduckgo_lite"
+    google_search_api_key: str = ""
+    google_search_engine_id: str = ""
+    google_calendar_credentials_file: str = "secrets/google-calendar-client.json"
+    google_calendar_token_file: str = "data/google-calendar-token.json"
+    google_calendar_id: str = "primary"
+    google_calendar_max_events: int = 10
+    weather_temperature_unit: str = "fahrenheit"
+    weather_wind_speed_unit: str = "mph"
+
     # ---- Voice Activity / Noise Gate ----
     vad_calibration_sec: float = 1.5
     vad_threshold_mult: float = 3.0
@@ -190,6 +208,27 @@ class Settings(BaseSettings):
         vv = str(v or "").strip().lower()
         allowed = {"llama_cpp", "ollama_http"}
         return vv if vv in allowed else "llama_cpp"
+
+    @field_validator("agent_web_search_provider", mode="before")
+    @classmethod
+    def _validate_agent_web_search_provider(cls, v: str | None) -> str:
+        vv = str(v or "").strip().lower()
+        allowed = {"duckduckgo_lite", "google_cse"}
+        return vv if vv in allowed else "duckduckgo_lite"
+
+    @field_validator("weather_temperature_unit", mode="before")
+    @classmethod
+    def _validate_weather_temperature_unit(cls, v: str | None) -> str:
+        vv = str(v or "").strip().lower()
+        allowed = {"celsius", "fahrenheit"}
+        return vv if vv in allowed else "fahrenheit"
+
+    @field_validator("weather_wind_speed_unit", mode="before")
+    @classmethod
+    def _validate_weather_wind_speed_unit(cls, v: str | None) -> str:
+        vv = str(v or "").strip().lower()
+        allowed = {"kmh", "ms", "mph", "kn"}
+        return vv if vv in allowed else "mph"
 
 
 # Single global instance

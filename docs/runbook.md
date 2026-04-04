@@ -189,6 +189,42 @@ Fast targeted checks:
 .\.venv\Scripts\python -m pytest tests\config\test_settings.py tests\memory\test_conversation.py -q
 ```
 
+## Assistant Tool Setup
+
+Jarvin now exposes explicit host-side assistant tools.
+
+Quick checks from chat:
+
+```text
+/tool help
+/tool weather Seattle
+/tool web local llama cpp docs
+/tool run git status
+```
+
+Google Calendar setup:
+
+1. Create a Google OAuth desktop client in Google Cloud.
+2. Save the downloaded JSON file as `secrets/google-calendar-client.json`.
+3. Start Jarvin with `python server.py`.
+4. From chat, run:
+
+```text
+/tool calendar auth
+```
+
+That will open a local browser on the host machine for the first authorization and store the token at `data/google-calendar-token.json`.
+
+Optional env overrides:
+
+```powershell
+$env:JARVIN_AGENT_WEB_SEARCH_PROVIDER = "duckduckgo_lite"
+$env:JARVIN_GOOGLE_SEARCH_API_KEY = ""
+$env:JARVIN_GOOGLE_SEARCH_ENGINE_ID = ""
+$env:JARVIN_GOOGLE_CALENDAR_CREDENTIALS_FILE = "secrets/google-calendar-client.json"
+$env:JARVIN_GOOGLE_CALENDAR_TOKEN_FILE = "data/google-calendar-token.json"
+```
+
 ## Common Troubleshooting
 
 ### Venv Broken After Python Changes

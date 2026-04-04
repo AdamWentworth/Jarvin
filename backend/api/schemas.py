@@ -92,3 +92,79 @@ class ConversationWorkspaceResponse(_StrictModel):
     conversations: list[ConversationSummary]
     active_conversation_id: int | None = None
     history: list[ConversationTurn]
+
+
+class AgentToolsManifestResponse(_StrictModel):
+    enabled: bool
+    workspace_root: str
+    commands: list[str]
+    allowed_commands: list[str]
+    writes_enabled: bool
+    commands_enabled: bool
+
+
+class AgentListRequest(_StrictModel):
+    path: str = "."
+    max_entries: int | None = None
+
+
+class AgentListResponse(_StrictModel):
+    path: str
+    entries: list[str]
+
+
+class AgentSearchRequest(_StrictModel):
+    query: str
+    path: str = "."
+    glob: str | None = None
+    max_results: int | None = None
+
+
+class AgentSearchMatch(_StrictModel):
+    path: str
+    line: int
+    text: str
+
+
+class AgentSearchResponse(_StrictModel):
+    query: str
+    matches: list[AgentSearchMatch]
+    truncated: bool = False
+
+
+class AgentReadRequest(_StrictModel):
+    path: str
+    start_line: int = 1
+    end_line: int | None = None
+
+
+class AgentReadResponse(_StrictModel):
+    path: str
+    start_line: int
+    end_line: int
+    text: str
+    truncated: bool = False
+
+
+class AgentWriteRequest(_StrictModel):
+    path: str
+    content: str
+    append: bool = False
+
+
+class AgentWriteResponse(_StrictModel):
+    path: str
+    bytes_written: int
+    append: bool = False
+
+
+class AgentCommandRequest(_StrictModel):
+    command: str
+
+
+class AgentCommandResponse(_StrictModel):
+    command: str
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+    timed_out: bool = False

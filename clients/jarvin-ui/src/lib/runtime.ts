@@ -20,6 +20,8 @@ export type RemoteVoiceDiagnostics = {
   note: string;
 };
 
+export const REMOTE_RECORDING_LIMIT_SECONDS = 90;
+
 export const DEFAULT_REMOTE_VOICE_DIAGNOSTICS: RemoteVoiceDiagnostics = {
   microphone: "idle",
   upload: "idle",
@@ -115,6 +117,13 @@ export function formatTimestamp(timestamp: string | null): string {
   }
 
   return parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+export function formatDuration(seconds: number): string {
+  const clamped = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(clamped / 60);
+  const remainingSeconds = clamped % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 export function stageLabel(state: PipelineStageState): string {

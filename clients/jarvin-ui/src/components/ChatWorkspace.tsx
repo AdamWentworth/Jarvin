@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Bars3Icon, Cog6ToothIcon, MicrophoneIcon, SpeakerWaveIcon, StopIcon } from "@heroicons/react/20/solid";
 import type { Choice, ConversationTurn } from "../lib/types";
 import type { ReasoningEffort } from "../lib/ui";
@@ -29,6 +29,8 @@ type ChatWorkspaceProps = {
   remoteVoiceDisabledReason: string;
   remoteVoiceStatus: string;
   isRemoteRecording: boolean;
+  remoteRecordingElapsedLabel: string;
+  remoteVoicePressToTalk: boolean;
   speakRepliesOnThisDevice: boolean;
   onChatInputChange: (value: string) => void;
   onStartListener: () => void;
@@ -40,6 +42,9 @@ type ChatWorkspaceProps = {
   onComposerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onSendMessage: () => void;
   onToggleRemoteVoice: () => void;
+  onRemoteVoicePressStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onRemoteVoicePressEnd: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onRemoteVoicePressCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPlayLatestReplyAudio: () => void;
   onToggleSpeakRepliesOnThisDevice: () => void;
   onReconnectHost: () => void;
@@ -72,6 +77,8 @@ export function ChatWorkspace({
   remoteVoiceDisabledReason,
   remoteVoiceStatus,
   isRemoteRecording,
+  remoteRecordingElapsedLabel,
+  remoteVoicePressToTalk,
   speakRepliesOnThisDevice,
   onChatInputChange,
   onStartListener,
@@ -83,6 +90,9 @@ export function ChatWorkspace({
   onComposerKeyDown,
   onSendMessage,
   onToggleRemoteVoice,
+  onRemoteVoicePressStart,
+  onRemoteVoicePressEnd,
+  onRemoteVoicePressCancel,
   onPlayLatestReplyAudio,
   onToggleSpeakRepliesOnThisDevice,
   onReconnectHost,
@@ -249,15 +259,30 @@ export function ChatWorkspace({
               <button
                 type="button"
                 className={`ghost-button send-icon-button remote-voice-button ${isRemoteRecording ? "recording" : ""}`}
-                aria-label={isRemoteRecording ? "Stop remote recording and send" : "Record from this device"}
+                aria-label={
+                  isRemoteRecording
+                    ? remoteVoicePressToTalk
+                      ? "Release to send your recording"
+                      : "Stop remote recording and send"
+                    : remoteVoicePressToTalk
+                      ? "Hold to talk from this device"
+                      : "Record from this device"
+                }
                 title={
                   remoteVoiceAvailable
                     ? isRemoteRecording
-                      ? "Stop recording and send"
-                      : "Record from this device"
+                      ? remoteVoicePressToTalk
+                        ? `Release to send (${remoteRecordingElapsedLabel})`
+                        : `Stop recording and send (${remoteRecordingElapsedLabel})`
+                      : remoteVoicePressToTalk
+                        ? "Hold to talk from this device"
+                        : "Record from this device"
                     : remoteVoiceDisabledReason
                 }
                 onClick={onToggleRemoteVoice}
+                onPointerDown={onRemoteVoicePressStart}
+                onPointerUp={onRemoteVoicePressEnd}
+                onPointerCancel={onRemoteVoicePressCancel}
                 disabled={!remoteVoiceAvailable || remoteVoiceBusy || sending}
               >
                 {isRemoteRecording ? <StopIcon aria-hidden="true" /> : <MicrophoneIcon aria-hidden="true" />}
