@@ -214,7 +214,7 @@ async def test_chat_endpoint_can_handle_tool_commands(monkeypatch):
     monkeypatch.setattr(
         chat_mod,
         "maybe_handle_assistant_tool_request",
-        lambda text: type("ToolReply", (), {"handled": True, "reply": "Search results for `todo`: ..."})(),
+        lambda text, conversation_id=None: type("ToolReply", (), {"handled": True, "reply": "Search results for `todo`: ..."})(),
         raising=True,
     )
 
@@ -235,7 +235,7 @@ async def test_chat_endpoint_can_speak_tool_command_replies(monkeypatch):
     monkeypatch.setattr(
         chat_mod,
         "maybe_handle_assistant_tool_request",
-        lambda text: type("ToolReply", (), {"handled": True, "reply": "Weather for Seattle"})(),
+        lambda text, conversation_id=None: type("ToolReply", (), {"handled": True, "reply": "Weather for Seattle"})(),
         raising=True,
     )
     monkeypatch.setattr(chat_mod, "synth_to_wav", lambda text: r"D:\Projects\Jarvin\temp\tts_tool.wav", raising=True)
@@ -245,3 +245,28 @@ async def test_chat_endpoint_can_speak_tool_command_replies(monkeypatch):
     assert resp.reply == "Weather for Seattle"
     assert resp.mode_used == "agent_tool"
     assert resp.tts_url == "/_temp/tts_tool.wav"
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_passes_conversation_id_to_tool_router(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(chat_mod, "get_user_profile", lambda: {}, raising=True)
+    monkeypatch.setattr(chat_mod, "get_conversation_history", lambda conversation_id=None: [], raising=True)
+    monkeypatch.setattr(chat_mod, "append_turn", lambda role, message, conversation_id=None: None, raising=True)
+
+    def fake_tool_router(text, conversation_id=None):
+        captured["text"] = text
+        captured["conversation_id"] = conversation_id
+        return type("ToolReply", (), {"handled": True, "reply": "Handled via tool"})()
+
+    monkeypatch.setattr(chat_mod, "maybe_handle_assistant_tool_request", fake_tool_router, raising=True)
+
+    resp = await chat_mod.chat_endpoint(ChatRequest(user_text="delete lunch from my calendar", conversation_id=77))
+
+    assert resp.reply == "Handled via tool"
+    assert resp.conversation_id == 77
+    assert captured == {
+        "text": "delete lunch from my calendar",
+        "conversation_id": 77,
+    }

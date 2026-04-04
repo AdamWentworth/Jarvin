@@ -30,7 +30,10 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         return ErrorResponse(error="empty user_text")
 
     try:
-        tool_response = maybe_handle_assistant_tool_request(text)
+        tool_response = maybe_handle_assistant_tool_request(
+            text,
+            conversation_id=payload.conversation_id,
+        )
     except Exception as exc:
         log.exception("Tool command failed: %s", exc)
         return ErrorResponse(error=str(exc))
