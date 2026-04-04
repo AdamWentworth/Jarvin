@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -15,6 +17,9 @@ GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 OPEN_METEO_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+SEARCH_USER_AGENT = "Jarvin/1.0 (+https://jarvin.local)"
+MAX_WEB_PAGE_CHARS = 7000
+MAX_WEB_PAGES_PER_QUERY = 3
 
 _RESULT_LINK_RE = re.compile(r'<a[^>]+href="(?P<href>[^"]+)"[^>]*>(?P<title>.*?)</a>', re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
@@ -56,6 +61,21 @@ class WebSearchResult:
     provider: str
     query: str
     items: list[WebSearchItem]
+
+
+@dataclass(frozen=True)
+class WebPageExtract:
+    url: str
+    title: str
+    excerpt: str
+
+
+@dataclass(frozen=True)
+class WebResearchResult:
+    provider: str
+    query: str
+    items: list[WebSearchItem]
+    pages: list[WebPageExtract]
 
 
 @dataclass(frozen=True)
@@ -124,6 +144,61 @@ def search_web(query: str, *, max_results: int = 5) -> WebSearchResult:
     if provider == "google_cse":
         return _google_cse_search(q, max_results=max_results)
     return _duckduckgo_lite_search(q, max_results=max_results)
+
+
+def browse_search_results(
+    query: str,
+    *,
+    max_results: int = 5,
+    max_pages: int = MAX_WEB_PAGES_PER_QUERY,
+) -> WebResearchResult:
+    results = search_web(query, max_results=max(max_results, max_pages))
+    pages: list[WebPageExtract] = []
+    for item in results.items:
+        if len(pages) >= max(1, int(max_pages)):
+            break
+        try:
+            page = fetch_web_page(item.url, fallback_title=item.title)
+        except Exception:
+            continue
+        if page.excerpt:
+            pages.append(page)
+    return WebResearchResult(
+        provider=results.provider,
+        query=results.query,
+        items=results.items,
+        pages=pages,
+    )
+
+
+def fetch_web_page(url: str, *, fallback_title: str = "") -> WebPageExtract:
+    target = str(url or "").strip()
+    if not target:
+        raise ValueError("Web page URL cannot be empty.")
+
+    response = requests.get(
+        target,
+        timeout=cfg.settings.agent_command_timeout_sec,
+        headers={"User-Agent": SEARCH_USER_AGENT},
+    )
+    response.raise_for_status()
+    content_type = str(response.headers.get("content-type") or "").lower()
+    text = response.text or ""
+    if "html" in content_type or "<html" in text.lower():
+        parsed_title, excerpt = _extract_html_page(text)
+    else:
+        parsed_title = fallback_title or target
+        excerpt = _normalize_text_block(text)
+
+    excerpt = excerpt[:MAX_WEB_PAGE_CHARS].strip()
+    if not excerpt:
+        raise ValueError(f"No readable text was extracted from {target}.")
+
+    return WebPageExtract(
+        url=target,
+        title=parsed_title or fallback_title or _display_url(target),
+        excerpt=excerpt,
+    )
 
 
 def get_weather(location: str) -> WeatherResult:
@@ -421,9 +496,106 @@ def _google_cse_search(query: str, *, max_results: int) -> WebSearchResult:
     return WebSearchResult(provider="google_cse", query=query, items=items)
 
 
+class _ReadableHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip_depth = 0
+        self._capture_title = False
+        self._title_chunks: list[str] = []
+        self._text_chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        lowered = tag.lower()
+        if lowered in {"script", "style", "svg", "noscript"}:
+            self._skip_depth += 1
+            return
+        if lowered == "title":
+            self._capture_title = True
+        if lowered in {"p", "div", "section", "article", "li", "h1", "h2", "h3", "h4", "blockquote", "pre", "br"}:
+            self._text_chunks.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.lower()
+        if lowered in {"script", "style", "svg", "noscript"} and self._skip_depth > 0:
+            self._skip_depth -= 1
+            return
+        if lowered == "title":
+            self._capture_title = False
+        if lowered in {"p", "div", "section", "article", "li", "h1", "h2", "h3", "h4", "blockquote", "pre"}:
+            self._text_chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth > 0:
+            return
+        cleaned = str(data or "").strip()
+        if not cleaned:
+            return
+        if self._capture_title:
+            self._title_chunks.append(cleaned)
+        self._text_chunks.append(cleaned)
+
+    @property
+    def title(self) -> str:
+        return _normalize_text_block(" ".join(self._title_chunks))
+
+    @property
+    def text(self) -> str:
+        return _normalize_text_block("\n".join(self._text_chunks))
+
+
 def _clean_html(text: str) -> str:
     stripped = _HTML_TAG_RE.sub("", text)
     return stripped.replace("&amp;", "&").replace("&quot;", '"').strip()
+
+
+def _extract_html_page(html: str) -> tuple[str, str]:
+    parser = _ReadableHTMLParser()
+    parser.feed(html)
+    parser.close()
+    return parser.title, _select_relevant_excerpt(parser.text)
+
+
+def _select_relevant_excerpt(text: str, *, max_blocks: int = 8) -> str:
+    lines = [line.strip() for line in text.splitlines()]
+    kept: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        normalized = _normalize_text_block(line)
+        if len(normalized) < 35:
+            continue
+        lowered = normalized.lower()
+        if lowered in seen:
+            continue
+        if any(
+            noise in lowered
+            for noise in (
+                "cookie",
+                "privacy policy",
+                "terms of service",
+                "sign in",
+                "log in",
+                "all rights reserved",
+                "advertisement",
+                "subscribe",
+            )
+        ):
+            continue
+        kept.append(normalized)
+        seen.add(lowered)
+        if len(kept) >= max_blocks:
+            break
+    return "\n".join(kept)
+
+
+def _normalize_text_block(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def _display_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc or url
+    path = parsed.path.rstrip("/")
+    return f"{host}{path}"
 
 
 def _safe_daily_value(daily: dict[str, Any], key: str) -> Any:

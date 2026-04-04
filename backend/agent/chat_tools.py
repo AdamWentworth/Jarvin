@@ -7,8 +7,10 @@ from typing import Callable
 
 import config as cfg
 from backend.agent import tools
+from backend.ai_engine import build_jarvin_config, generate_reply
 from backend.agent.external_tools import (
     begin_google_calendar_auth,
+    browse_search_results,
     create_calendar_event_from_text,
     delete_calendar_event,
     find_calendar_events,
@@ -20,7 +22,6 @@ from backend.agent.external_tools import (
     google_search_is_configured,
     prepare_reschedule_times,
     reschedule_calendar_event,
-    search_web,
     update_calendar_event_fields,
 )
 from backend.agent.pending_actions import (
@@ -597,41 +598,88 @@ def _run_reply(command: str) -> str:
 
 
 def _web_search_reply(query: str) -> str:
-    result = search_web(query)
-    lines = [
-        f"- [{item.title}]({item.url})" + (f" — {item.snippet}" if item.snippet else "")
-        for item in result.items
-    ]
-    return f"Web results from `{result.provider}` for `{result.query}`:\n" + "\n".join(lines)
+    research = browse_search_results(query)
+    return _render_web_research_reply(research, label="Web")
 
 
 def _google_search_reply(query: str, *, natural: bool) -> str:
     provider = str(cfg.settings.agent_web_search_provider or "").strip().lower()
     if provider != "google_cse":
         if natural:
-            result = search_web(query)
+            research = browse_search_results(query)
             note = (
                 "Google search is not configured on this host, so I used the current web search provider instead.\n\n"
                 if not google_search_is_configured()
                 else "Google search is not the active provider on this host, so I used the current web search provider instead.\n\n"
             )
-            lines = [
-                f"- [{item.title}]({item.url})" + (f" — {item.snippet}" if item.snippet else "")
-                for item in result.items
-            ]
-            return note + f"Web results from `{result.provider}` for `{result.query}`:\n" + "\n".join(lines)
+            return note + _render_web_research_reply(research, label="Web")
         return (
             "Google search is not the active provider on this host. "
             "Set `JARVIN_AGENT_WEB_SEARCH_PROVIDER=google_cse` with valid Google search credentials, "
             "or use `/tool web <query>` for the current web-search provider."
         )
 
-    result = search_web(query)
+    research = browse_search_results(query)
+    return _render_web_research_reply(research, label="Google")
+
+
+def _render_web_research_reply(research, *, label: str) -> str:
+    if getattr(research, "pages", None):
+        summary = _summarize_web_research(research)
+        if not summary:
+            summary = _fallback_web_research_summary(research)
+        sources = "\n".join(
+            f"- [{page.title}]({page.url})"
+            for page in research.pages
+        )
+        return (
+            f"{label} search from `{research.provider}` for `{research.query}`:\n\n"
+            f"{summary}\n\n"
+            f"Sources:\n{sources}"
+        )
+
     lines = [
-        f"- [{item.title}]({item.url})" + (f" — {item.snippet}" if item.snippet else "")
-        for item in result.items
+        f"- [{item.title}]({item.url})" + (f" - {item.snippet}" if item.snippet else "")
+        for item in research.items
     ]
-    return f"Google results for `{result.query}`:\n" + "\n".join(lines)
+    return f"{label} results from `{research.provider}` for `{research.query}`:\n" + "\n".join(lines)
+
+
+def _summarize_web_research(research) -> str:
+    source_blocks = []
+    for index, page in enumerate(research.pages, start=1):
+        source_blocks.append(
+            f"[{index}] {page.title}\n"
+            f"URL: {page.url}\n"
+            f"Excerpt:\n{page.excerpt}"
+        )
+
+    system = (
+        "You are summarizing web research for Jarvin. "
+        "Write 2-4 concise bullet points that answer the user's search request from the provided sources. "
+        "Cite supporting source numbers inline like [1] or [2]. "
+        "If the sources are thin or uncertain, say so briefly."
+    )
+    cfg = build_jarvin_config(
+        mode="agent_strong",
+        system_instructions=system,
+        temperature=0.2,
+        max_tokens=320,
+    )
+    prompt = (
+        f"Search query: {research.query}\n"
+        "Answer from the source notes below. Prefer direct usefulness over verbosity."
+    )
+    return generate_reply(prompt, cfg=cfg, context="\n\n".join(source_blocks)).strip()
+
+
+def _fallback_web_research_summary(research) -> str:
+    bullets = []
+    for index, page in enumerate(research.pages, start=1):
+        first_line = page.excerpt.splitlines()[0].strip() if page.excerpt else ""
+        snippet = first_line[:220].rstrip()
+        bullets.append(f"- [{index}] {page.title}: {snippet}")
+    return "\n".join(bullets)
 
 
 def _weather_reply(location: str) -> str:

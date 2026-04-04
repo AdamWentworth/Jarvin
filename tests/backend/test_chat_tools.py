@@ -6,6 +6,8 @@ from backend.agent.external_tools import (
     CalendarEventDetails,
     CalendarEventMatch,
     CalendarEventSummary,
+    WebPageExtract,
+    WebResearchResult,
     WeatherResult,
     WebSearchItem,
     WebSearchResult,
@@ -36,19 +38,28 @@ def test_help_command_includes_external_tools(monkeypatch):
 def test_web_command_formats_results(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
-        "search_web",
-        lambda query: WebSearchResult(
+        "browse_search_results",
+        lambda query: WebResearchResult(
             provider="duckduckgo_lite",
             query=query,
             items=[WebSearchItem(title="Jarvin", url="https://example.com", snippet="Local assistant")],
+            pages=[
+                WebPageExtract(
+                    url="https://example.com",
+                    title="Jarvin",
+                    excerpt="Jarvin is a local assistant focused on voice and tools.",
+                )
+            ],
         ),
         raising=True,
     )
+    monkeypatch.setattr(chat_tools, "generate_reply", lambda *args, **kwargs: "- Jarvin is a local assistant [1].", raising=True)
 
     response = chat_tools.maybe_handle_tool_command("/tool web jarvin assistant")
     assert response.handled is True
     assert "duckduckgo_lite" in response.reply
     assert "https://example.com" in response.reply
+    assert "local assistant [1]" in response.reply
 
 
 def test_weather_command_formats_forecast(monkeypatch):
@@ -139,19 +150,28 @@ def test_natural_language_google_request_falls_back_when_google_is_not_configure
     monkeypatch.setattr(chat_tools, "google_search_is_configured", lambda: False, raising=True)
     monkeypatch.setattr(
         chat_tools,
-        "search_web",
-        lambda query: WebSearchResult(
+        "browse_search_results",
+        lambda query: WebResearchResult(
             provider="duckduckgo_lite",
             query=query,
             items=[WebSearchItem(title="Jarvin docs", url="https://example.com", snippet="Search result")],
+            pages=[
+                WebPageExtract(
+                    url="https://example.com",
+                    title="Jarvin docs",
+                    excerpt="Jarvin supports local tools and mobile voice access.",
+                )
+            ],
         ),
         raising=True,
     )
+    monkeypatch.setattr(chat_tools, "generate_reply", lambda *args, **kwargs: "- Jarvin supports local tools [1].", raising=True)
 
     response = chat_tools.maybe_handle_assistant_tool_request("Google Jarvin docs")
     assert response.handled is True
     assert "not configured on this host" in response.reply
     assert "https://example.com" in response.reply
+    assert "local tools [1]" in response.reply
 
 
 def test_natural_language_repo_search_is_handled(monkeypatch):

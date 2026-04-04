@@ -177,6 +177,8 @@ class Settings(BaseSettings):
         env_prefix="JARVIN_",
         case_sensitive=False,
         extra="ignore",
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
 
     @property
