@@ -7,6 +7,14 @@ from typing import Callable
 
 import config as cfg
 from backend.agent import tools
+from backend.agent.briefing_tools import (
+    handle_brief_command,
+    maybe_handle_brief_request,
+)
+from backend.agent.reminder_tools import (
+    handle_reminder_command,
+    maybe_handle_reminder_request,
+)
 from backend.ai_engine import build_jarvin_config, generate_reply
 from backend.agent.external_tools import (
     begin_google_calendar_auth,
@@ -172,6 +180,10 @@ def maybe_handle_tool_command(text: str, *, conversation_id: int | None = None) 
         return _safe_tool_call(lambda: _google_search_reply(rest, natural=False), "I couldn't use Google search just now.")
     if verb == "weather":
         return _safe_tool_call(lambda: _weather_reply(rest), "I couldn't check the weather just now.")
+    if verb == "brief":
+        return _safe_tool_call(lambda: handle_brief_command(rest), "I couldn't build the morning brief just now.")
+    if verb == "reminder":
+        return _safe_tool_call(lambda: handle_reminder_command(rest), "I couldn't manage reminders just now.")
     if verb == "calendar":
         return _safe_tool_call(
             lambda: _calendar_command_reply(rest, conversation_id=conversation_id),
@@ -191,6 +203,14 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
 
     if _CALENDAR_AUTH_RE.search(message):
         return _safe_tool_call(lambda: begin_google_calendar_auth(), "I couldn't start Google Calendar authorization.")
+
+    brief_reply = maybe_handle_brief_request(message)
+    if brief_reply is not None:
+        return ToolChatResponse(handled=True, reply=brief_reply)
+
+    reminder_reply = maybe_handle_reminder_request(message)
+    if reminder_reply is not None:
+        return ToolChatResponse(handled=True, reply=reminder_reply)
 
     details_match = _CALENDAR_DETAILS_RE.search(message)
     if details_match:

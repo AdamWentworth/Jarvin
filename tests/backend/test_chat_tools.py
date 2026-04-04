@@ -83,6 +83,32 @@ def test_weather_command_formats_forecast(monkeypatch):
     assert "Partly cloudy" in response.reply
 
 
+def test_brief_command_uses_briefing_tooling(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "handle_brief_command",
+        lambda rest: f"Morning brief::{rest or 'default'}",
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_tool_command("/tool brief morning")
+    assert response.handled is True
+    assert "Morning brief::morning" in response.reply
+
+
+def test_reminder_command_uses_reminder_tooling(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "handle_reminder_command",
+        lambda rest: f"Saved reminder via command: {rest}",
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_tool_command("/tool reminder add call mom tomorrow at 5pm")
+    assert response.handled is True
+    assert "Saved reminder via command" in response.reply
+
+
 def test_calendar_command_formats_agenda(monkeypatch):
     monkeypatch.setattr(chat_tools, "google_calendar_credentials_configured", lambda: True, raising=True)
     monkeypatch.setattr(chat_tools, "google_calendar_token_available", lambda: True, raising=True)
@@ -193,6 +219,34 @@ def test_natural_language_run_is_handled(monkeypatch):
     response = chat_tools.maybe_handle_assistant_tool_request("run git status")
     assert response.handled is True
     assert "git status" in response.reply
+
+
+def test_natural_language_reminder_request_is_handled(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda text: "Saved reminder `call mom` for `2026-04-05 05:00 PM`.",
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request("remind me to call mom tomorrow at 5pm")
+
+    assert response.handled is True
+    assert "Saved reminder" in response.reply
+
+
+def test_natural_language_brief_request_is_handled(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_brief_request",
+        lambda text: "Morning brief output",
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request("give me my morning brief")
+
+    assert response.handled is True
+    assert response.reply == "Morning brief output"
 
 
 def test_natural_language_calendar_create_is_handled(monkeypatch):

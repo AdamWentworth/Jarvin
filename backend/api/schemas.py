@@ -94,6 +94,39 @@ class ConversationWorkspaceResponse(_StrictModel):
     history: list[ConversationTurn]
 
 
+class ReminderItem(_StrictModel):
+    id: int
+    title: str
+    notes: str = ""
+    due_at: str
+    recurrence: str = "once"
+    status: str = "pending"
+    created_at: str | None = None
+    updated_at: str | None = None
+    completed_at: str | None = None
+    is_routine: bool = False
+    is_overdue: bool = False
+
+
+class ReminderListResponse(_StrictModel):
+    reminders: list[ReminderItem]
+
+
+class ReminderCreateRequest(_StrictModel):
+    title: str
+    due_at: str
+    recurrence: str = "once"
+    notes: str = ""
+
+
+class ReminderUpdateRequest(_StrictModel):
+    title: str | None = None
+    due_at: str | None = None
+    recurrence: str | None = None
+    notes: str | None = None
+    status: str | None = None
+
+
 class AgentToolsManifestResponse(_StrictModel):
     enabled: bool
     workspace_root: str

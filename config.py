@@ -129,6 +129,7 @@ class Settings(BaseSettings):
     google_calendar_max_events: int = 10
     weather_temperature_unit: str = "fahrenheit"
     weather_wind_speed_unit: str = "mph"
+    default_weather_location: str = ""
 
     # ---- Voice Activity / Noise Gate ----
     vad_calibration_sec: float = 1.5

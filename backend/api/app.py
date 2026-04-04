@@ -23,6 +23,7 @@ from backend.api.routes.audio import router as audio_router  # <-- single audio 
 from backend.api.routes.llm import router as llm_router
 from backend.api.routes.agent_tools import router as agent_tools_router
 from backend.api.routes.workspace import router as workspace_router
+from backend.api.routes.reminders import router as reminders_router
 from backend.middleware.graceful_cancel import GracefulCancelMiddleware  # NEW
 from backend.util.paths import ensure_temp_dir
 
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_router)
     app.include_router(agent_tools_router)
     app.include_router(workspace_router)
+    app.include_router(reminders_router)
 
     @app.get("/app", include_in_schema=False)
     def _desktop_shell_redirect():
