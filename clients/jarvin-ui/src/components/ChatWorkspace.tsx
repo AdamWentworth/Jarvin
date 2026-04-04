@@ -1,5 +1,5 @@
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
-import { Cog6ToothIcon } from "@heroicons/react/20/solid";
+import { Bars3Icon, Cog6ToothIcon, MicrophoneIcon, SpeakerWaveIcon, StopIcon } from "@heroicons/react/20/solid";
 import type { Choice, ConversationTurn } from "../lib/types";
 import type { ReasoningEffort } from "../lib/ui";
 
@@ -8,6 +8,9 @@ type ChatWorkspaceProps = {
   history: ConversationTurn[];
   messageListRef: RefObject<HTMLDivElement | null>;
   chatStatus: string;
+  replyAudioStatus: string;
+  latestReplyAudioReady: boolean;
+  isReplyAudioPlaying: boolean;
   chatInput: string;
   sending: boolean;
   currentListenerStatus: string;
@@ -17,6 +20,12 @@ type ChatWorkspaceProps = {
   selectedModel: string;
   modelChoices: Choice[];
   reasoningEffort: ReasoningEffort;
+  remoteVoiceAvailable: boolean;
+  remoteVoiceBusy: boolean;
+  remoteVoiceDisabledReason: string;
+  remoteVoiceStatus: string;
+  isRemoteRecording: boolean;
+  speakRepliesOnThisDevice: boolean;
   onChatInputChange: (value: string) => void;
   onStartListener: () => void;
   onPauseListener: () => void;
@@ -26,7 +35,11 @@ type ChatWorkspaceProps = {
   onReasoningEffortChange: (value: ReasoningEffort) => void;
   onComposerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onSendMessage: () => void;
+  onToggleRemoteVoice: () => void;
+  onPlayLatestReplyAudio: () => void;
+  onToggleSpeakRepliesOnThisDevice: () => void;
   onOpenSettings: () => void;
+  onOpenConversationSidebar: () => void;
 };
 
 export function ChatWorkspace({
@@ -34,6 +47,9 @@ export function ChatWorkspace({
   history,
   messageListRef,
   chatStatus,
+  replyAudioStatus,
+  latestReplyAudioReady,
+  isReplyAudioPlaying,
   chatInput,
   sending,
   currentListenerStatus,
@@ -43,6 +59,12 @@ export function ChatWorkspace({
   selectedModel,
   modelChoices,
   reasoningEffort,
+  remoteVoiceAvailable,
+  remoteVoiceBusy,
+  remoteVoiceDisabledReason,
+  remoteVoiceStatus,
+  isRemoteRecording,
+  speakRepliesOnThisDevice,
   onChatInputChange,
   onStartListener,
   onPauseListener,
@@ -52,14 +74,29 @@ export function ChatWorkspace({
   onReasoningEffortChange,
   onComposerKeyDown,
   onSendMessage,
+  onToggleRemoteVoice,
+  onPlayLatestReplyAudio,
+  onToggleSpeakRepliesOnThisDevice,
   onOpenSettings,
+  onOpenConversationSidebar,
 }: ChatWorkspaceProps) {
   return (
     <section className="chat-column">
       <header className="chat-header">
         <div className="chat-header-copy">
           <div className="eyebrow">Active conversation</div>
-          <h2>{activeConversationTitle}</h2>
+          <div className="chat-title-row">
+            <button
+              type="button"
+              className="ghost-button icon-button mobile-nav-button"
+              aria-label="Open conversations"
+              title="Open conversations"
+              onClick={onOpenConversationSidebar}
+            >
+              <Bars3Icon aria-hidden="true" />
+            </button>
+            <h2>{activeConversationTitle}</h2>
+          </div>
         </div>
 
         <div className="listener-controls">
@@ -115,9 +152,21 @@ export function ChatWorkspace({
         </div>
 
         <footer className="composer-shell">
-          {chatStatus ? (
+          {chatStatus || remoteVoiceStatus || replyAudioStatus || latestReplyAudioReady ? (
             <div className="composer-status-row">
-              <p className="composer-status">{chatStatus}</p>
+              {chatStatus ? <p className="composer-status">{chatStatus}</p> : null}
+              {remoteVoiceStatus ? <p className="composer-status remote-voice-status">{remoteVoiceStatus}</p> : null}
+              {replyAudioStatus ? <p className="composer-status reply-audio-status">{replyAudioStatus}</p> : null}
+              {latestReplyAudioReady ? (
+                <button
+                  type="button"
+                  className="ghost-button compact-button inline-status-button"
+                  onClick={onPlayLatestReplyAudio}
+                >
+                  <SpeakerWaveIcon aria-hidden="true" />
+                  {isReplyAudioPlaying ? "Replay" : "Play reply"}
+                </button>
+              ) : null}
             </div>
           ) : null}
 
@@ -176,6 +225,33 @@ export function ChatWorkspace({
             </div>
 
             <div className="composer-buttons">
+              <button
+                type="button"
+                className={`ghost-button send-icon-button remote-voice-button ${isRemoteRecording ? "recording" : ""}`}
+                aria-label={isRemoteRecording ? "Stop remote recording and send" : "Record from this device"}
+                title={
+                  remoteVoiceAvailable
+                    ? isRemoteRecording
+                      ? "Stop recording and send"
+                      : "Record from this device"
+                    : remoteVoiceDisabledReason
+                }
+                onClick={onToggleRemoteVoice}
+                disabled={!remoteVoiceAvailable || remoteVoiceBusy || sending}
+              >
+                {isRemoteRecording ? <StopIcon aria-hidden="true" /> : <MicrophoneIcon aria-hidden="true" />}
+              </button>
+
+              <button
+                type="button"
+                className={`ghost-button send-icon-button reply-audio-toggle-button ${speakRepliesOnThisDevice ? "active" : ""}`}
+                aria-label={speakRepliesOnThisDevice ? "Disable spoken replies on this device" : "Enable spoken replies on this device"}
+                title={speakRepliesOnThisDevice ? "Spoken replies are enabled on this device" : "Enable spoken replies on this device"}
+                onClick={onToggleSpeakRepliesOnThisDevice}
+              >
+                <SpeakerWaveIcon aria-hidden="true" />
+              </button>
+
               <button
                 type="button"
                 className="primary-button send-button send-icon-button"

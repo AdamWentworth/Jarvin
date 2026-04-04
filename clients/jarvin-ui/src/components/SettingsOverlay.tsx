@@ -12,6 +12,11 @@ type SettingsOverlayProps = {
   isOpen: boolean;
   onClose: () => void;
   apiBaseUrl: string;
+  apiBaseUrlDraft: string;
+  onApiBaseUrlDraftChange: (value: string) => void;
+  onSaveApiBaseUrl: () => void;
+  onClearApiBaseUrl: () => void;
+  apiBaseUrlStatus: string;
   currentListenerStatus: string;
   currentModel: string;
   currentBackend: string;
@@ -32,6 +37,18 @@ type SettingsOverlayProps = {
   onListenerAction: (action: "start" | "stop" | "shutdown") => void;
   isListening: boolean;
   deviceStatus: string;
+  remoteVoiceAvailable: boolean;
+  remoteVoiceDisabledReason: string;
+  remoteVoiceStatus: string;
+  isRemoteRecording: boolean;
+  isRemoteTranscribing: boolean;
+  onToggleRemoteVoice: () => void;
+  speakRepliesOnThisDevice: boolean;
+  onToggleSpeakRepliesOnThisDevice: () => void;
+  replyAudioStatus: string;
+  latestReplyAudioReady: boolean;
+  isReplyAudioPlaying: boolean;
+  onPlayLatestReplyAudio: () => void;
   profile: UserProfilePayload;
   onProfileChange: (updater: (current: UserProfilePayload) => UserProfilePayload) => void;
   onSaveProfile: (event: FormEvent<HTMLFormElement>) => void;
@@ -43,6 +60,11 @@ export function SettingsOverlay({
   isOpen,
   onClose,
   apiBaseUrl,
+  apiBaseUrlDraft,
+  onApiBaseUrlDraftChange,
+  onSaveApiBaseUrl,
+  onClearApiBaseUrl,
+  apiBaseUrlStatus,
   currentListenerStatus,
   currentModel,
   currentBackend,
@@ -63,6 +85,18 @@ export function SettingsOverlay({
   onListenerAction,
   isListening,
   deviceStatus,
+  remoteVoiceAvailable,
+  remoteVoiceDisabledReason,
+  remoteVoiceStatus,
+  isRemoteRecording,
+  isRemoteTranscribing,
+  onToggleRemoteVoice,
+  speakRepliesOnThisDevice,
+  onToggleSpeakRepliesOnThisDevice,
+  replyAudioStatus,
+  latestReplyAudioReady,
+  isReplyAudioPlaying,
+  onPlayLatestReplyAudio,
   profile,
   onProfileChange,
   onSaveProfile,
@@ -107,6 +141,33 @@ export function SettingsOverlay({
         </header>
 
         <div className="settings-dialog-body">
+          <section className="nested-panel">
+            <div className="section-copy">
+              <h3>Host connection</h3>
+              <p>The shared client can point at your Jarvin host over WireGuard without rebuilding the app.</p>
+            </div>
+
+            <label className="field-stack">
+              <span>Host URL</span>
+              <input
+                value={apiBaseUrlDraft}
+                onChange={(event) => onApiBaseUrlDraftChange(event.currentTarget.value)}
+                placeholder="http://10.0.0.5:8000"
+              />
+            </label>
+
+            <div className="button-row">
+              <button type="button" className="primary-button" onClick={onSaveApiBaseUrl}>
+                Save host
+              </button>
+              <button type="button" className="ghost-button" onClick={onClearApiBaseUrl}>
+                Reset host
+              </button>
+            </div>
+
+            <p className="section-status">{apiBaseUrlStatus || `Current client target: ${apiBaseUrl}`}</p>
+          </section>
+
           <section className="overview-card">
             <div className="overview-grid">
               <div className="overview-stat">
@@ -190,42 +251,108 @@ export function SettingsOverlay({
           {activeInspectorSection === "voice" ? (
             <section className="inspector-panel-body">
               <div className="section-copy">
-                <h3>Voice and devices</h3>
-                <p>Host voice controls stay available, but they no longer sit in the main chat column.</p>
+                <h3>Voice modes</h3>
+                <p>Jarvin now distinguishes host-room audio from remote client audio so phone access is less confusing.</p>
               </div>
 
-              <div className="button-row">
-                <button type="button" className="start-button" onClick={() => onListenerAction("start")} disabled={isListening}>
-                  Start
-                </button>
-                <button type="button" className="pause-button" onClick={() => onListenerAction("stop")} disabled={!isListening}>
-                  Pause
-                </button>
-                <button type="button" className="danger-button" onClick={() => onListenerAction("shutdown")}>
-                  Shutdown
-                </button>
-              </div>
+              <section className="nested-panel">
+                <div className="section-copy">
+                  <h3>Remote client microphone</h3>
+                  <p>Use the microphone on this device for push-to-talk input. This is separate from the host machine microphones.</p>
+                </div>
 
-              <label className="field-stack">
-                <span>Input device</span>
-                <select value={selectedDeviceIndex} onChange={(event) => onSelectAudioDevice(Number(event.currentTarget.value))}>
-                  <option value="" disabled>
-                    Choose an input device
-                  </option>
-                  {(audioDevices?.devices ?? []).map((device) => (
-                    <option key={device.index} value={device.index}>
-                      [{device.index}] {device.name}
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className={isRemoteRecording ? "danger-button" : "primary-button"}
+                    onClick={onToggleRemoteVoice}
+                    disabled={!remoteVoiceAvailable || isRemoteTranscribing}
+                    title={remoteVoiceAvailable ? "Use this device microphone" : remoteVoiceDisabledReason}
+                  >
+                    {isRemoteTranscribing ? "Transcribing..." : isRemoteRecording ? "Stop and send" : "Record from this device"}
+                  </button>
+                </div>
+
+                <p className="section-status">
+                  {remoteVoiceStatus ||
+                    (remoteVoiceAvailable
+                      ? "Ready to capture audio from this browser or app shell."
+                      : remoteVoiceDisabledReason)}
+                </p>
+              </section>
+
+              <section className="nested-panel">
+                <div className="section-copy">
+                  <h3>Reply audio on this device</h3>
+                  <p>When enabled, Jarvin will synthesize reply audio on the host and play it back through this phone or client.</p>
+                </div>
+
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className={speakRepliesOnThisDevice ? "primary-button" : "ghost-button"}
+                    onClick={onToggleSpeakRepliesOnThisDevice}
+                  >
+                    {speakRepliesOnThisDevice ? "Spoken replies enabled" : "Enable spoken replies"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={onPlayLatestReplyAudio}
+                    disabled={!latestReplyAudioReady}
+                  >
+                    {isReplyAudioPlaying ? "Replay latest reply" : "Play latest reply"}
+                  </button>
+                </div>
+
+                <p className="section-status">
+                  {replyAudioStatus ||
+                    (speakRepliesOnThisDevice
+                      ? "Jarvin will try to play reply audio through this device."
+                      : "Reply audio is currently muted on this device.")}
+                </p>
+              </section>
+
+              <section className="nested-panel">
+                <div className="section-copy">
+                  <h3>Host listener and devices</h3>
+                  <p>These controls affect the Jarvin machine itself, including microphones physically attached to the host PC.</p>
+                </div>
+
+                <div className="button-row">
+                  <button type="button" className="start-button" onClick={() => onListenerAction("start")} disabled={isListening}>
+                    Start host listener
+                  </button>
+                  <button type="button" className="pause-button" onClick={() => onListenerAction("stop")} disabled={!isListening}>
+                    Pause host listener
+                  </button>
+                  <button type="button" className="danger-button" onClick={() => onListenerAction("shutdown")}>
+                    Shutdown host
+                  </button>
+                </div>
+
+                <label className="field-stack">
+                  <span>Host input device</span>
+                  <select value={selectedDeviceIndex} onChange={(event) => onSelectAudioDevice(Number(event.currentTarget.value))}>
+                    <option value="" disabled>
+                      Choose a host input device
                     </option>
-                  ))}
-                </select>
-              </label>
+                    {(audioDevices?.devices ?? []).map((device) => (
+                      <option key={device.index} value={device.index}>
+                        [{device.index}] {device.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              <p className="section-status">
-                {deviceStatus ||
-                  (audioDevices?.selected_name
-                    ? `Current input: [${audioDevices.selected_index}] ${audioDevices.selected_name}`
-                    : "No input device selected.")}
-              </p>
+                <p className="section-status">
+                  {deviceStatus ||
+                    (audioDevices?.selected_name
+                      ? `Current host input: [${audioDevices.selected_index}] ${audioDevices.selected_name}`
+                      : "No host input device selected.")}
+                </p>
+              </section>
             </section>
           ) : null}
 

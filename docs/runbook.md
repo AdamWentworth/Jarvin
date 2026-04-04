@@ -92,6 +92,73 @@ $env:VITE_JARVIN_API_BASE_URL = "http://127.0.0.1:8000"
 npm run tauri dev
 ```
 
+## Run The Shared Mobile / VPN Shell
+
+Build the host-served frontend once:
+
+```powershell
+cd clients\jarvin-ui
+npm install
+npm run build:host
+```
+
+Then run the Jarvin host:
+
+```powershell
+python server.py
+```
+
+Open the shared shell from another device over WireGuard:
+
+```text
+http://<wireguard-host-ip>:8000/app/
+```
+
+Notes:
+
+- The `/app/` shell reuses the same React client as the Tauri desktop app.
+- It uses the same origin as the Jarvin host automatically, so no extra API env var is required for the phone browser path.
+- Re-run `npm run build:host` whenever you change the shared frontend.
+- Host listener and input-device controls refer to microphones attached to the Jarvin PC, not the phone.
+- Remote browser microphone capture is a separate path and usually needs HTTPS or a Tauri mobile shell.
+
+## Build The Tauri Android Shell
+
+The shared React client can also run inside a Tauri Android shell, which is the preferred path for phone voice because it avoids the browser secure-context problems that block remote mic capture on plain HTTP.
+
+Machine paths currently working on this PC:
+
+- Android SDK: `%LOCALAPPDATA%\Android\Sdk`
+- Android NDK: `%LOCALAPPDATA%\Android\Sdk\ndk\27.2.12479018`
+- Java: `C:\Program Files\Java\jdk-20`
+
+Fast path for a Pixel 8 Pro style device:
+
+```powershell
+cd clients\jarvin-ui
+npm run tauri:android:pixel:debug
+```
+
+That helper will:
+
+- initialize the Android project if it is missing
+- ensure the phone-mic permissions are present in the generated Android manifest
+- build the shared frontend
+- target `aarch64` / `arm64`
+- fall back to direct Gradle packaging if Windows blocks the Tauri symlink step
+
+Expected APK output:
+
+```text
+clients/jarvin-ui/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
+```
+
+Notes:
+
+- The debug APK allows cleartext HTTP so it can reach `http://<wireguard-host-ip>:8000` over WireGuard.
+- The mobile client should use the in-app `Host URL` setting to point at the Jarvin machine.
+- If you enable Windows Developer Mode later, the plain `npm run tauri:android:build -- --debug --target aarch64` path should become cleaner because Tauri will be allowed to create the symlink it wants during packaging.
+
 ## GPU Diagnostics
 
 ```powershell

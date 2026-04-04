@@ -11,6 +11,12 @@ class TranscribeResponse(_StrictModel):
     transcribed_text: str
 
 
+class TranscribeBytesRequest(_StrictModel):
+    audio_base64: str
+    content_type: str | None = None
+    filename: str | None = None
+
+
 class ErrorResponse(_StrictModel):
     error: str
 
@@ -36,12 +42,14 @@ class ChatRequest(_StrictModel):
     use_history: bool = True
     history_window: int | None = None
     use_profile: bool = True
+    speak_reply: bool = False
 
 
 class ChatResponse(_StrictModel):
     reply: str
     mode_used: str
     conversation_id: int | None = None
+    tts_url: str | None = None
 
 
 class UserProfilePayload(_StrictModel):

@@ -4,8 +4,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -24,6 +26,45 @@ from backend.middleware.graceful_cancel import GracefulCancelMiddleware  # NEW
 from backend.util.paths import ensure_temp_dir
 
 log = logging.getLogger("jarvin")
+
+
+def _desktop_shell_dist_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "clients" / "jarvin-ui" / "dist-host"
+
+
+def _desktop_shell_not_built_response() -> PlainTextResponse:
+    return PlainTextResponse(
+        "Jarvin mobile/web shell is not built yet. Run `cd clients/jarvin-ui && npm run build:host` first.",
+        status_code=503,
+    )
+
+
+def _desktop_shell_file_response(asset_path: str = ""):
+    dist_root = _desktop_shell_dist_dir()
+    if not dist_root.is_dir():
+        return _desktop_shell_not_built_response()
+
+    safe_root = dist_root.resolve()
+    index_path = safe_root / "index.html"
+
+    requested = asset_path.strip("/")
+    if not requested:
+        return FileResponse(index_path)
+
+    candidate = (safe_root / requested).resolve()
+    try:
+        candidate.relative_to(safe_root)
+    except ValueError:
+        return PlainTextResponse("Not found.", status_code=404)
+
+    if candidate.is_file():
+        return FileResponse(candidate)
+
+    # Let SPA-style routes fall back to index while real missing assets 404 cleanly.
+    if "." in Path(requested).name:
+        return PlainTextResponse("Not found.", status_code=404)
+
+    return FileResponse(index_path)
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
@@ -83,6 +124,18 @@ def create_app() -> FastAPI:
     app.include_router(audio_router)  # <-- single include
     app.include_router(llm_router)
     app.include_router(workspace_router)
+
+    @app.get("/app", include_in_schema=False)
+    def _desktop_shell_redirect():
+        return RedirectResponse(url="/app/", status_code=307)
+
+    @app.get("/app/", include_in_schema=False)
+    def _desktop_shell_index():
+        return _desktop_shell_file_response()
+
+    @app.get("/app/{asset_path:path}", include_in_schema=False)
+    def _desktop_shell_assets(asset_path: str):
+        return _desktop_shell_file_response(asset_path)
 
     # Serve ephemeral files (ASR/utterances and synthesized TTS) under /_temp
     temp_root = ensure_temp_dir()

@@ -1,11 +1,14 @@
 # backend/api/routes/chat.py
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from fastapi import APIRouter
 
 from backend.api.schemas import ChatRequest, ChatResponse, ErrorResponse
 from backend.ai_engine import build_context, build_jarvin_config, generate_reply
+from backend.tts.engine import synth_to_wav
 from memory.conversation import (
     get_conversation_history,
     get_user_profile,
@@ -58,10 +61,22 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
 
     try:
         reply = generate_reply(text, cfg=cfg, context=context_str)
+        tts_url = None
+        if payload.speak_reply and reply.strip():
+            try:
+                tts_path = await asyncio.to_thread(synth_to_wav, reply)
+                tts_url = f"/_temp/{os.path.basename(tts_path)}"
+            except Exception as exc:
+                log.exception("Reply speech synthesis failed: %s", exc)
         # Persist turn so subsequent requests have fresh context
         append_turn("user", text, conversation_id=conversation_id)
         append_turn("assistant", reply, conversation_id=conversation_id)
-        return ChatResponse(reply=reply, mode_used=cfg.mode, conversation_id=conversation_id)
+        return ChatResponse(
+            reply=reply,
+            mode_used=cfg.mode,
+            conversation_id=conversation_id,
+            tts_url=tts_url,
+        )
     except Exception as e:
         log.exception("Chat generation failed: %s", e)
         return ErrorResponse(error="chat generation failed")

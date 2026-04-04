@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 from functools import lru_cache
+import wave
 
 import numpy as np
 import whisper
@@ -87,6 +88,19 @@ def _ensure_model_and_device(
     return _get_model_and_device(model_size)
 
 
+def _load_audio_waveform(file_path: str) -> np.ndarray:
+    """
+    Load local audio into Whisper's expected mono 16 kHz float32 waveform.
+
+    Fast-path RIFF/WAV utterances without ffmpeg, but fall back to Whisper's
+    broader container decoder for uploads such as webm/opus from mobile clients.
+    """
+    try:
+        return wav_to_float32_mono_16k(file_path)
+    except (wave.Error, EOFError, ValueError):
+        return whisper.load_audio(file_path)
+
+
 def transcribe_audio(
     file_path: str,
     *,
@@ -98,7 +112,7 @@ def transcribe_audio(
     Transcribe an audio file using Whisper. Resamples to 16 kHz mono float32.
     """
     model, device = _ensure_model_and_device(model, device, model_size)
-    waveform: np.ndarray = wav_to_float32_mono_16k(file_path)
+    waveform: np.ndarray = _load_audio_waveform(file_path)
 
     fp16 = _infer_fp16_flag(model, device)
     kwargs = {"fp16": fp16}

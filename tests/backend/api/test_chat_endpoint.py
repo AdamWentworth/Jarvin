@@ -166,3 +166,28 @@ async def test_chat_endpoint_can_target_specific_conversation(monkeypatch):
     assert resp.conversation_id == 42
     assert calls["history"] == [42]
     assert calls["append"] == [("user", "hello", 42), ("assistant", "ok", 42)]
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_can_include_tts_url(monkeypatch):
+    monkeypatch.setattr(chat_mod, "get_user_profile", lambda: {}, raising=True)
+    monkeypatch.setattr(chat_mod, "get_conversation_history", lambda conversation_id=None: [], raising=True)
+    monkeypatch.setattr(
+        chat_mod,
+        "append_turn",
+        lambda role, message, conversation_id=None: None,
+        raising=True,
+    )
+    monkeypatch.setattr(chat_mod, "generate_reply", lambda text, cfg=None, context=None: "spoken reply", raising=True)
+    monkeypatch.setattr(chat_mod, "synth_to_wav", lambda text: r"D:\Projects\Jarvin\temp\tts_test.wav", raising=True)
+
+    payload = ChatRequest(
+        user_text="hello",
+        use_profile=False,
+        use_history=False,
+        speak_reply=True,
+    )
+    resp = await chat_mod.chat_endpoint(payload)
+
+    assert resp.reply == "spoken reply"
+    assert resp.tts_url == "/_temp/tts_test.wav"

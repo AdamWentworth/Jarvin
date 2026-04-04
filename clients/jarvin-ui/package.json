@@ -6,8 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:host": "tsc && vite build --base=/app/ --outDir dist-host",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:android:init": "tauri android init --ci",
+    "tauri:android:dev": "tauri android dev",
+    "tauri:android:build": "tauri android build",
+    "tauri:android:pixel:debug": "powershell -ExecutionPolicy Bypass -File scripts/build-android-arm64-debug.ps1"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

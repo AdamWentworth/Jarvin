@@ -38,6 +38,11 @@ export interface ChatResponse {
   reply: string;
   mode_used: ChatMode | string;
   conversation_id: number | null;
+  tts_url?: string | null;
+}
+
+export interface TranscribeResponse {
+  transcribed_text: string;
 }
 
 export interface StatusResponse {

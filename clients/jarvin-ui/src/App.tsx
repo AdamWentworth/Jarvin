@@ -1,9 +1,11 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import "./App.css";
 import {
   ApiError,
   activateConversation,
   applyLlmSelection,
+  buildApiUrl,
+  clearStoredApiBaseUrl,
   clearConversation,
   createConversation,
   deleteConversation,
@@ -11,15 +13,18 @@ import {
   getAudioDevices,
   getLive,
   getLlmOptions,
+  getStoredApiBaseUrl,
   getStatus,
   getWorkspaceBootstrap,
   renameConversation,
   saveProfile,
   selectAudioDevice,
   sendChatMessage,
+  setStoredApiBaseUrl,
   shutdownHost,
   startListener,
   stopListener,
+  transcribeAudioBlob,
 } from "./lib/api";
 import type {
   AudioDevicesResponse,
@@ -65,6 +70,58 @@ function syncWorkspaceState(
   setHistory(data.history);
 }
 
+type RemoteVoiceCapability = {
+  available: boolean;
+  reason: string;
+};
+
+function detectRemoteVoiceCapability(): RemoteVoiceCapability {
+  if (typeof window === "undefined") {
+    return { available: false, reason: "Remote microphone capture is only available in a browser or app shell." };
+  }
+
+  if (!window.isSecureContext) {
+    return { available: false, reason: "Remote microphone capture needs HTTPS or a Tauri mobile shell." };
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return { available: false, reason: "This client does not expose microphone access." };
+  }
+
+  if (typeof MediaRecorder === "undefined") {
+    return { available: false, reason: "This client does not support in-browser audio recording." };
+  }
+
+  return { available: true, reason: "" };
+}
+
+const SPEAK_REPLIES_STORAGE_KEY = "jarvin.speakRepliesOnDevice";
+
+function detectMobileClient(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  return /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
+function getStoredSpeakRepliesPreference(): boolean {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") {
+    return detectMobileClient();
+  }
+
+  const raw = window.localStorage.getItem(SPEAK_REPLIES_STORAGE_KEY);
+  if (raw === null) {
+    return detectMobileClient();
+  }
+  return raw === "true";
+}
+
+function setStoredSpeakRepliesPreference(value: boolean) {
+  if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
+    window.localStorage.setItem(SPEAK_REPLIES_STORAGE_KEY, String(value));
+  }
+}
+
 function App() {
   const [profile, setProfile] = useState<UserProfilePayload>(DEFAULT_PROFILE);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -82,17 +139,36 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [connectionError, setConnectionError] = useState("");
+  const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState<string>(() => getStoredApiBaseUrl() ?? getApiBaseUrl());
+  const [apiBaseUrlStatus, setApiBaseUrlStatus] = useState("");
   const [chatStatus, setChatStatus] = useState("");
+  const [replyAudioStatus, setReplyAudioStatus] = useState("");
+  const [latestReplyAudioUrl, setLatestReplyAudioUrl] = useState<string | null>(null);
+  const [isReplyAudioPlaying, setIsReplyAudioPlaying] = useState(false);
+  const [speakRepliesOnThisDevice, setSpeakRepliesOnThisDevice] = useState<boolean>(() => getStoredSpeakRepliesPreference());
   const [llmStatus, setLlmStatus] = useState("");
   const [profileStatus, setProfileStatus] = useState("");
   const [deviceStatus, setDeviceStatus] = useState("");
+  const [remoteVoiceStatus, setRemoteVoiceStatus] = useState("");
+  const [isRemoteRecording, setIsRemoteRecording] = useState(false);
+  const [isRemoteTranscribing, setIsRemoteTranscribing] = useState(false);
   const [openConversationMenuId, setOpenConversationMenuId] = useState<number | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<number | null>(null);
   const [editingConversationTitle, setEditingConversationTitle] = useState("");
   const [activeInspectorSection, setActiveInspectorSection] = useState<InspectorSection>("assistant");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const lastLiveSeq = useRef<number | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+  const replyAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const remoteVoiceCapability = useMemo(
+    () => detectRemoteVoiceCapability(),
+    [],
+  );
 
   const currentListenerStatus = useMemo(
     () => statusLabel(status, live),
@@ -144,6 +220,7 @@ function App() {
       setLive(currentLive);
       lastLiveSeq.current = currentLive.seq ?? null;
       setChatStatus("");
+      setApiBaseUrlStatus("");
     } catch (error) {
       setConnectionError(describeError(error));
     } finally {
@@ -239,6 +316,85 @@ function App() {
     return () => window.clearInterval(poll);
   }, [activeConversationId, sending]);
 
+  useEffect(() => {
+    return () => {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.onstop = null;
+        withRecorderStop(recorder);
+      }
+      stopRemoteStream(mediaStreamRef);
+      const replyAudio = replyAudioRef.current;
+      if (replyAudio) {
+        replyAudio.pause();
+        replyAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  async function playReplyAudio(url: string) {
+    const absoluteUrl = buildApiUrl(url);
+    const currentAudio = replyAudioRef.current;
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
+
+    const audio = new Audio(absoluteUrl);
+    audio.preload = "auto";
+    replyAudioRef.current = audio;
+
+    audio.onended = () => {
+      setIsReplyAudioPlaying(false);
+      setReplyAudioStatus("");
+    };
+
+    audio.onerror = () => {
+      setIsReplyAudioPlaying(false);
+      setReplyAudioStatus("Reply audio could not be played on this device.");
+    };
+
+    try {
+      setIsReplyAudioPlaying(true);
+      setReplyAudioStatus("Playing Jarvin's reply...");
+      await audio.play();
+    } catch (error) {
+      setIsReplyAudioPlaying(false);
+      setReplyAudioStatus(describeError(error) || "Reply audio is ready. Tap play to hear it.");
+      throw error;
+    }
+  }
+
+  function handleToggleSpeakRepliesOnThisDevice() {
+    setSpeakRepliesOnThisDevice((current) => {
+      const next = !current;
+      setStoredSpeakRepliesPreference(next);
+      if (!next) {
+        const audio = replyAudioRef.current;
+        if (audio) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+        setIsReplyAudioPlaying(false);
+      }
+      setReplyAudioStatus(next ? "Jarvin will speak replies on this device when audio is available." : "");
+      return next;
+    });
+  }
+
+  async function handlePlayLatestReplyAudio() {
+    if (!latestReplyAudioUrl) {
+      setReplyAudioStatus("No reply audio is ready yet.");
+      return;
+    }
+
+    try {
+      await playReplyAudio(latestReplyAudioUrl);
+    } catch {
+      // Status is already updated inside playReplyAudio.
+    }
+  }
+
   async function handleSelectConversation(conversationId: number) {
     setOpenConversationMenuId(null);
     setEditingConversationId(null);
@@ -246,6 +402,7 @@ function App() {
     try {
       const workspace = await activateConversation(conversationId);
       syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
+      setIsMobileSidebarOpen(false);
       setChatStatus("Conversation ready.");
     } catch (error) {
       setChatStatus(describeError(error));
@@ -261,6 +418,7 @@ function App() {
       const workspace = await createConversation();
       syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
       setChatInput("");
+      setIsMobileSidebarOpen(false);
       setChatStatus("Fresh chat ready.");
     } catch (error) {
       setChatStatus(describeError(error));
@@ -335,8 +493,8 @@ function App() {
     }
   }
 
-  async function handleSendMessage() {
-    const text = chatInput.trim();
+  async function handleSendMessage(rawText?: string) {
+    const text = (rawText ?? chatInput).trim();
     if (!text || sending) {
       return;
     }
@@ -369,6 +527,7 @@ function App() {
         userText: text,
         conversationId,
         mode: chatMode,
+        speakReply: speakRepliesOnThisDevice,
       });
       const nextConversationId = response.conversation_id ?? conversationId;
       if (nextConversationId === null) {
@@ -376,7 +535,24 @@ function App() {
       }
       const workspace = await activateConversation(nextConversationId);
       syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-      setChatInput("");
+      if (rawText === undefined) {
+        setChatInput("");
+      }
+      if (response.tts_url) {
+        setLatestReplyAudioUrl(response.tts_url);
+        if (speakRepliesOnThisDevice) {
+          try {
+            await playReplyAudio(response.tts_url);
+          } catch {
+            setReplyAudioStatus("Reply audio is ready. Tap play to hear it on this device.");
+          }
+        } else {
+          setReplyAudioStatus("Reply audio is ready.");
+        }
+      } else {
+        setLatestReplyAudioUrl(null);
+        setReplyAudioStatus(speakRepliesOnThisDevice ? "Reply audio was not available for this response." : "");
+      }
       setChatStatus("");
     } catch (error) {
       setChatStatus(describeError(error));
@@ -456,6 +632,83 @@ function App() {
     }
   }
 
+  async function handleSaveApiBaseUrl() {
+    try {
+      const next = setStoredApiBaseUrl(apiBaseUrlDraft);
+      setApiBaseUrlDraft(next);
+      setApiBaseUrlStatus("Saved host URL. Trying connection...");
+      await refreshWorkspace();
+    } catch (error) {
+      setApiBaseUrlStatus(describeError(error));
+    }
+  }
+
+  async function handleClearApiBaseUrlOverride() {
+    clearStoredApiBaseUrl();
+    const next = getApiBaseUrl();
+    setApiBaseUrlDraft(next);
+    setApiBaseUrlStatus("Using the default host URL again.");
+    await refreshWorkspace();
+  }
+
+  async function handleRemoteVoiceToggle() {
+    if (!remoteVoiceCapability.available) {
+      setRemoteVoiceStatus(remoteVoiceCapability.reason);
+      return;
+    }
+
+    if (isRemoteTranscribing || sending) {
+      return;
+    }
+
+    const activeRecorder = mediaRecorderRef.current;
+    if (activeRecorder && activeRecorder.state !== "inactive") {
+      setRemoteVoiceStatus("Finishing remote capture...");
+      withRecorderStop(activeRecorder);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      mediaChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          mediaChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = () => {
+        setRemoteVoiceStatus("Remote microphone capture failed.");
+        setIsRemoteRecording(false);
+        mediaRecorderRef.current = null;
+        mediaChunksRef.current = [];
+        stopRemoteStream(mediaStreamRef);
+      };
+
+      recorder.onstop = () => {
+        void finalizeRemoteRecording({
+          mediaChunksRef,
+          mediaRecorderRef,
+          mediaStreamRef,
+          setIsRemoteRecording,
+          setIsRemoteTranscribing,
+          setRemoteVoiceStatus,
+          sendMessage: (text) => handleSendMessage(text),
+        });
+      };
+
+      recorder.start();
+      setRemoteVoiceStatus("Listening on this device. Tap again to send.");
+      setIsRemoteRecording(true);
+    } catch (error) {
+      setRemoteVoiceStatus(describeError(error) || "Microphone permission was denied.");
+    }
+  }
+
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -473,7 +726,7 @@ function App() {
     return (
       <main className="app-shell loading-shell">
         <section className="loading-card">
-          <div className="eyebrow">Desktop Shell</div>
+          <div className="eyebrow">Jarvin Client</div>
           <h1>Preparing Jarvin</h1>
           <p>Connecting this desktop client to the local host machine and loading the workspace.</p>
         </section>
@@ -489,11 +742,26 @@ function App() {
           <h1>Jarvin is not answering yet</h1>
           <p>The desktop client could not reach the host at <code>{getApiBaseUrl()}</code>.</p>
           <p className="section-status">{connectionError}</p>
+          <label className="field-stack">
+            <span>Host URL</span>
+            <input
+              value={apiBaseUrlDraft}
+              onChange={(event) => setApiBaseUrlDraft(event.currentTarget.value)}
+              placeholder="http://10.0.0.5:8000"
+            />
+          </label>
           <div className="button-row">
+            <button type="button" className="secondary-button" onClick={() => void handleSaveApiBaseUrl()}>
+              Save host
+            </button>
             <button type="button" className="primary-button" onClick={() => void refreshWorkspace()}>
               Retry connection
             </button>
+            <button type="button" className="ghost-button" onClick={() => void handleClearApiBaseUrlOverride()}>
+              Reset host
+            </button>
           </div>
+          {apiBaseUrlStatus ? <p className="section-status">{apiBaseUrlStatus}</p> : null}
           <p className="section-status">
             Start the host with <code>python server.py</code>, then retry.
           </p>
@@ -503,7 +771,16 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${isMobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
+      {isMobileSidebarOpen ? (
+        <button
+          type="button"
+          className="mobile-sidebar-backdrop"
+          aria-label="Close conversations"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      ) : null}
+
       <section className="workspace-grid">
         <ConversationSidebar
           conversations={conversations}
@@ -520,6 +797,8 @@ function App() {
           onRenameConversationSubmit={(event, conversationId) => void handleRenameConversationSubmit(event, conversationId)}
           onClearConversation={(conversationId) => void handleClearConversation(conversationId)}
           onDeleteConversation={(conversationId) => void handleDeleteConversation(conversationId)}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
 
         <ChatWorkspace
@@ -527,6 +806,9 @@ function App() {
           history={history}
           messageListRef={messageListRef}
           chatStatus={chatStatus}
+          replyAudioStatus={replyAudioStatus}
+          latestReplyAudioReady={Boolean(latestReplyAudioUrl)}
+          isReplyAudioPlaying={isReplyAudioPlaying}
           chatInput={chatInput}
           sending={sending}
           currentListenerStatus={currentListenerStatus}
@@ -545,6 +827,16 @@ function App() {
           onReasoningEffortChange={setReasoningEffort}
           onComposerKeyDown={handleComposerKeyDown}
           onSendMessage={() => void handleSendMessage()}
+          remoteVoiceAvailable={remoteVoiceCapability.available}
+          remoteVoiceBusy={isRemoteTranscribing}
+          remoteVoiceDisabledReason={remoteVoiceCapability.reason}
+          remoteVoiceStatus={remoteVoiceStatus}
+          isRemoteRecording={isRemoteRecording}
+          speakRepliesOnThisDevice={speakRepliesOnThisDevice}
+          onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
+          onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
+          onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}
+          onOpenConversationSidebar={() => setIsMobileSidebarOpen(true)}
           onOpenSettings={() => {
             setActiveInspectorSection("assistant");
             setIsSettingsOpen(true);
@@ -556,6 +848,11 @@ function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         apiBaseUrl={getApiBaseUrl()}
+        apiBaseUrlDraft={apiBaseUrlDraft}
+        onApiBaseUrlDraftChange={setApiBaseUrlDraft}
+        onSaveApiBaseUrl={() => void handleSaveApiBaseUrl()}
+        onClearApiBaseUrl={() => void handleClearApiBaseUrlOverride()}
+        apiBaseUrlStatus={apiBaseUrlStatus}
         currentListenerStatus={currentListenerStatus}
         currentModel={llmOptions?.current_model ?? "Unknown"}
         currentBackend={llmOptions?.current_backend ?? "Unknown"}
@@ -576,6 +873,18 @@ function App() {
         onListenerAction={(action) => void handleListenerAction(action)}
         isListening={Boolean(status?.listening)}
         deviceStatus={deviceStatus}
+        remoteVoiceAvailable={remoteVoiceCapability.available}
+        remoteVoiceDisabledReason={remoteVoiceCapability.reason}
+        remoteVoiceStatus={remoteVoiceStatus}
+        isRemoteRecording={isRemoteRecording}
+        isRemoteTranscribing={isRemoteTranscribing}
+        onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
+        speakRepliesOnThisDevice={speakRepliesOnThisDevice}
+        onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}
+        replyAudioStatus={replyAudioStatus}
+        latestReplyAudioReady={Boolean(latestReplyAudioUrl)}
+        isReplyAudioPlaying={isReplyAudioPlaying}
+        onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
         profile={profile}
         onProfileChange={setProfile}
         onSaveProfile={(event) => void handleSaveProfile(event)}
@@ -587,3 +896,75 @@ function App() {
 }
 
 export default App;
+
+function withRecorderStop(recorder: MediaRecorder) {
+  try {
+    recorder.stop();
+  } catch {
+    // ignore invalid stop calls during teardown
+  }
+}
+
+function stopRemoteStream(streamRef: MutableRefObject<MediaStream | null>) {
+  const stream = streamRef.current;
+  if (stream) {
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+  }
+  streamRef.current = null;
+}
+
+async function finalizeRemoteRecording({
+  mediaChunksRef,
+  mediaRecorderRef,
+  mediaStreamRef,
+  setIsRemoteRecording,
+  setIsRemoteTranscribing,
+  setRemoteVoiceStatus,
+  sendMessage,
+}: {
+  mediaChunksRef: MutableRefObject<Blob[]>;
+  mediaRecorderRef: MutableRefObject<MediaRecorder | null>;
+  mediaStreamRef: MutableRefObject<MediaStream | null>;
+  setIsRemoteRecording: (value: boolean) => void;
+  setIsRemoteTranscribing: (value: boolean) => void;
+  setRemoteVoiceStatus: (value: string) => void;
+  sendMessage: (text: string) => Promise<void>;
+}) {
+  const recorder = mediaRecorderRef.current;
+  const mimeType = recorder?.mimeType || mediaChunksRef.current[0]?.type || "audio/webm";
+  const blob = new Blob(mediaChunksRef.current, { type: mimeType });
+
+  mediaRecorderRef.current = null;
+  mediaChunksRef.current = [];
+  setIsRemoteRecording(false);
+  stopRemoteStream(mediaStreamRef);
+
+  if (blob.size === 0) {
+    setRemoteVoiceStatus("No remote audio was captured.");
+    return;
+  }
+
+  try {
+    setIsRemoteTranscribing(true);
+    setRemoteVoiceStatus("Transcribing remote audio...");
+    const response = await transcribeAudioBlob(blob, `remote-input.${mimeType.includes("mp4") ? "m4a" : "webm"}`);
+    const text = response.transcribed_text.trim();
+    if (!text) {
+      setRemoteVoiceStatus("No speech detected in the remote audio.");
+      return;
+    }
+
+    setRemoteVoiceStatus(`Heard: ${text}`);
+    await sendMessage(text);
+  } catch (error) {
+    if (error instanceof Error && error.message) {
+      setRemoteVoiceStatus(error.message);
+    } else {
+      setRemoteVoiceStatus("Remote voice input failed.");
+    }
+  } finally {
+    setIsRemoteTranscribing(false);
+  }
+}

@@ -7,11 +7,13 @@ import type {
   LLMOptionsResponse,
   LiveSnapshot,
   StatusResponse,
+  TranscribeResponse,
   UserProfilePayload,
   WorkspaceBootstrapResponse,
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL_STORAGE_KEY = "jarvin.apiBaseUrl";
 
 export class ApiError extends Error {
   status: number;
@@ -25,19 +27,116 @@ export class ApiError extends Error {
   }
 }
 
+function normalizeApiBaseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Enter a full host URL such as http://10.0.0.5:8000");
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Host URL must start with http:// or https://");
+  }
+
+  return parsed.origin;
+}
+
+function describeNetworkError(error: unknown, fallback: string): Error {
+  if (error instanceof Error) {
+    return new Error(error.message || fallback);
+  }
+  return new Error(fallback);
+}
+
+function canUseStorage(): boolean {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+export function getStoredApiBaseUrl(): string | null {
+  if (!canUseStorage()) {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(API_BASE_URL_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const normalized = normalizeApiBaseUrl(raw);
+    return normalized || null;
+  } catch {
+    window.localStorage.removeItem(API_BASE_URL_STORAGE_KEY);
+    return null;
+  }
+}
+
+export function setStoredApiBaseUrl(raw: string): string {
+  const normalized = normalizeApiBaseUrl(raw);
+  if (!normalized) {
+    throw new Error("Enter a full host URL such as http://10.0.0.5:8000");
+  }
+
+  if (canUseStorage()) {
+    window.localStorage.setItem(API_BASE_URL_STORAGE_KEY, normalized);
+  }
+  return normalized;
+}
+
+export function clearStoredApiBaseUrl() {
+  if (canUseStorage()) {
+    window.localStorage.removeItem(API_BASE_URL_STORAGE_KEY);
+  }
+}
+
 export function getApiBaseUrl(): string {
-  const raw = import.meta.env.VITE_JARVIN_API_BASE_URL ?? DEFAULT_API_BASE_URL;
-  return raw.replace(/\/+$/, "");
+  const explicit = import.meta.env.VITE_JARVIN_API_BASE_URL;
+  if (explicit) {
+    return normalizeApiBaseUrl(explicit);
+  }
+
+  const stored = getStoredApiBaseUrl();
+  if (stored) {
+    return stored;
+  }
+
+  if (
+    typeof window !== "undefined" &&
+    (window.location.protocol === "http:" || window.location.protocol === "https:") &&
+    window.location.pathname.startsWith("/app")
+  ) {
+    return normalizeApiBaseUrl(window.location.origin);
+  }
+
+  return normalizeApiBaseUrl(DEFAULT_API_BASE_URL);
+}
+
+export function buildApiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  return `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch (error) {
+    throw describeNetworkError(error, `Could not reach the Jarvin host at ${getApiBaseUrl()}.`);
+  }
 
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
@@ -144,6 +243,7 @@ export function sendChatMessage(params: {
   userText: string;
   conversationId: number | null;
   mode: ChatMode;
+  speakReply: boolean;
 }) {
   return requestJson<ChatResponse>("/chat", {
     method: "POST",
@@ -153,6 +253,79 @@ export function sendChatMessage(params: {
       mode: params.mode,
       use_history: true,
       use_profile: true,
+      speak_reply: params.speakReply,
     }),
   });
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the recorded audio on this device."));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Could not prepare the recorded audio for upload."));
+        return;
+      }
+
+      const [, base64] = reader.result.split(",", 2);
+      if (!base64) {
+        reject(new Error("Could not encode the recorded audio for upload."));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function transcribeAudioBlobViaJson(blob: Blob, filename: string) {
+  const audioBase64 = await blobToBase64(blob);
+  const body = await requestJson<TranscribeResponse & { error?: string }>("/transcribe-bytes", {
+    method: "POST",
+    body: JSON.stringify({
+      audio_base64: audioBase64,
+      content_type: blob.type || null,
+      filename,
+    }),
+  });
+
+  if (body && typeof body === "object" && "error" in body && body.error) {
+    throw new Error(String(body.error));
+  }
+
+  return body;
+}
+
+export async function transcribeAudioBlob(blob: Blob, filename = "remote-input.webm") {
+  const form = new FormData();
+  form.append("audio_file", blob, filename);
+
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}/transcribe`, {
+      method: "POST",
+      body: form,
+    });
+  } catch {
+    return await transcribeAudioBlobViaJson(blob, filename);
+  }
+
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    const detail =
+      (body && typeof body === "object" && "detail" in body && String(body.detail)) ||
+      (body && typeof body === "object" && "error" in body && String(body.error)) ||
+      response.statusText ||
+      "Transcription failed";
+    throw new ApiError(detail, response.status, body);
+  }
+
+  if (body && typeof body === "object" && "error" in body && body.error) {
+    throw new ApiError(String(body.error), response.status, body);
+  }
+
+  return body as TranscribeResponse;
 }

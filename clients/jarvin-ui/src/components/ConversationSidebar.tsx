@@ -1,5 +1,5 @@
 import type { FormEvent, MouseEvent } from "react";
-import { PencilSquareIcon } from "@heroicons/react/20/solid";
+import { PencilSquareIcon, XMarkIcon } from "@heroicons/react/20/solid";
 import type { ConversationSummary } from "../lib/types";
 
 type ConversationSidebarProps = {
@@ -17,6 +17,8 @@ type ConversationSidebarProps = {
   onRenameConversationSubmit: (event: FormEvent<HTMLFormElement>, conversationId: number) => void;
   onClearConversation: (conversationId: number) => void;
   onDeleteConversation: (conversationId: number) => void;
+  isMobileOpen: boolean;
+  onCloseMobile: () => void;
 };
 
 export function ConversationSidebar({
@@ -34,21 +36,35 @@ export function ConversationSidebar({
   onRenameConversationSubmit,
   onClearConversation,
   onDeleteConversation,
+  isMobileOpen,
+  onCloseMobile,
 }: ConversationSidebarProps) {
   return (
-    <aside className="sidebar-shell">
+    <aside className={`sidebar-shell ${isMobileOpen ? "mobile-open" : ""}`}>
       <div className="sidebar-top">
         <div className="eyebrow">Conversations</div>
 
-        <button
-          type="button"
-          className="primary-button new-chat-button"
-          aria-label="Start a new chat"
-          title="New chat"
-          onClick={onCreateConversation}
-        >
-          <PencilSquareIcon aria-hidden="true" />
-        </button>
+        <div className="sidebar-actions">
+          <button
+            type="button"
+            className="primary-button new-chat-button"
+            aria-label="Start a new chat"
+            title="New chat"
+            onClick={onCreateConversation}
+          >
+            <PencilSquareIcon aria-hidden="true" />
+          </button>
+
+          <button
+            type="button"
+            className="ghost-button icon-button sidebar-close-button"
+            aria-label="Close conversations"
+            title="Close conversations"
+            onClick={onCloseMobile}
+          >
+            <XMarkIcon aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       <nav className="conversation-nav" aria-label="Conversations">
