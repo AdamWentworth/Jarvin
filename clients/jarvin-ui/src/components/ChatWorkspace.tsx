@@ -1,8 +1,9 @@
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Bars3Icon, Cog6ToothIcon, MicrophoneIcon, SpeakerWaveIcon, StopIcon } from "@heroicons/react/20/solid";
-import type { Choice, ConversationTurn } from "../lib/types";
+import type { Choice, ConversationTurn, WeatherToolPayload } from "../lib/types";
 import type { ReasoningEffort } from "../lib/ui";
 import type { ConnectionState } from "../lib/runtime";
+import { WeatherMessageCard } from "./WeatherMessageCard";
 
 type ChatWorkspaceProps = {
   activeConversationTitle: string;
@@ -99,6 +100,13 @@ export function ChatWorkspace({
   onOpenSettings,
   onOpenConversationSidebar,
 }: ChatWorkspaceProps) {
+  function weatherPayloadForTurn(turn: ConversationTurn): WeatherToolPayload | null {
+    if (turn.tool_kind !== "weather" || !turn.tool_payload) {
+      return null;
+    }
+    return turn.tool_payload as WeatherToolPayload;
+  }
+
   return (
     <section className="chat-column">
       <header className="chat-header">
@@ -156,17 +164,22 @@ export function ChatWorkspace({
               <p>Start a conversation here while the host keeps the models and GPU local.</p>
             </div>
           ) : (
-            history.map((turn, index) => (
-              <article
-                key={`${turn.role}-${index}`}
-                className={`message-row ${turn.role === "user" ? "user" : "assistant"}`}
-              >
-                <div className="message-card">
-                  <div className="message-role">{turn.role === "user" ? "You" : "Jarvin"}</div>
-                  <div className="message-text">{turn.message}</div>
-                </div>
-              </article>
-            ))
+            history.map((turn, index) => {
+              const weatherPayload = weatherPayloadForTurn(turn);
+
+              return (
+                <article
+                  key={`${turn.role}-${index}`}
+                  className={`message-row ${turn.role === "user" ? "user" : "assistant"}`}
+                >
+                  <div className={`message-card ${weatherPayload ? "has-tool-card" : ""}`}>
+                    <div className="message-role">{turn.role === "user" ? "You" : "Jarvin"}</div>
+                    <div className="message-text">{turn.message}</div>
+                    {weatherPayload ? <WeatherMessageCard payload={weatherPayload} /> : null}
+                  </div>
+                </article>
+              );
+            })
           )}
         </div>
 

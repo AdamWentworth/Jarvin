@@ -1,6 +1,7 @@
 # memory/conversation.py
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sqlite3
 import threading
@@ -109,6 +110,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "ALTER TABLE conversation_history ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE;"
             )
+        if not _column_exists(conn, "conversation_history", "tool_kind"):
+            conn.execute("ALTER TABLE conversation_history ADD COLUMN tool_kind TEXT;")
+        if not _column_exists(conn, "conversation_history", "tool_payload_json"):
+            conn.execute("ALTER TABLE conversation_history ADD COLUMN tool_payload_json TEXT;")
 
         # Helpful indexes
         conn.execute(
@@ -297,6 +302,42 @@ def get_conversation_history(conversation_id: Optional[int] = None) -> List[Tupl
         return [(row["role"], row["message"]) for row in cur.fetchall()]
 
 
+def get_conversation_turns(conversation_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Return structured turns for UI rendering, including optional tool metadata.
+    """
+    conn = _connect()
+    with _lock:
+        cid = int(conversation_id or _get_active_conversation_id(conn))
+        cur = conn.execute(
+            """
+            SELECT role, message, tool_kind, tool_payload_json
+            FROM conversation_history
+            WHERE conversation_id = ?
+            ORDER BY id ASC;
+            """,
+            (cid,),
+        )
+        turns: list[Dict[str, Any]] = []
+        for row in cur.fetchall():
+            payload = None
+            raw_payload = row["tool_payload_json"]
+            if raw_payload:
+                try:
+                    payload = json.loads(raw_payload)
+                except Exception:
+                    payload = None
+            turns.append(
+                {
+                    "role": row["role"],
+                    "message": row["message"],
+                    "tool_kind": row["tool_kind"],
+                    "tool_payload": payload,
+                }
+            )
+        return turns
+
+
 def set_conversation_history(history: List[Tuple[str, str]], conversation_id: Optional[int] = None) -> None:
     """
     Replace the entire history for the given (or active) conversation.
@@ -312,13 +353,24 @@ def set_conversation_history(history: List[Tuple[str, str]], conversation_id: Op
             )
 
 
-def append_turn(role: str, message: str, conversation_id: Optional[int] = None) -> None:
+def append_turn(
+    role: str,
+    message: str,
+    conversation_id: Optional[int] = None,
+    *,
+    tool_kind: str | None = None,
+    tool_payload: Dict[str, Any] | None = None,
+) -> None:
     conn = _connect()
     with _lock, conn:
         cid = int(conversation_id or _get_active_conversation_id(conn))
+        payload_json = json.dumps(tool_payload, ensure_ascii=True) if tool_payload is not None else None
         conn.execute(
-            "INSERT INTO conversation_history (role, message, conversation_id) VALUES (?, ?, ?);",
-            (role, message, cid),
+            """
+            INSERT INTO conversation_history (role, message, conversation_id, tool_kind, tool_payload_json)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (role, message, cid, tool_kind, payload_json),
         )
 
 

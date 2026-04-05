@@ -85,6 +85,30 @@ def test_clear_conversation_and_history_roundtrip(tmp_path):
     assert conv.get_conversation_history(cid) == []
 
 
+def test_conversation_turns_include_tool_metadata(tmp_path):
+    conv = _reload_conversation(tmp_path)
+    cid = conv.get_active_conversation_id()
+
+    conv.append_turn(
+        "assistant",
+        "Tomorrow in Burnaby: light rain.",
+        conversation_id=cid,
+        tool_kind="weather",
+        tool_payload={
+            "location_label": "Burnaby, British Columbia, Canada",
+            "target_label": "Tomorrow",
+            "summary": "Light rain",
+            "icon_name": "rain",
+        },
+    )
+
+    turns = conv.get_conversation_turns(cid)
+    assert len(turns) == 1
+    assert turns[0]["tool_kind"] == "weather"
+    assert turns[0]["tool_payload"]["location_label"] == "Burnaby, British Columbia, Canada"
+    assert turns[0]["tool_payload"]["icon_name"] == "rain"
+
+
 def test_user_profile_upsert_and_get(tmp_path):
     conv = _reload_conversation(tmp_path)  # noqa: F841
 

@@ -15,7 +15,7 @@ from memory.conversation import (
     clear_conversation,
     delete_conversation,
     get_active_conversation_id,
-    get_conversation_history,
+    get_conversation_turns,
     get_user_profile,
     list_conversations,
     new_conversation,
@@ -56,8 +56,13 @@ def _conversation_summaries() -> tuple[list[ConversationSummary], int | None]:
 
 def _history_payload(conversation_id: int | None) -> list[ConversationTurn]:
     return [
-        ConversationTurn(role=str(role), message=str(message))
-        for role, message in get_conversation_history(conversation_id=conversation_id)
+        ConversationTurn(
+            role=str(item.get("role") or ""),
+            message=str(item.get("message") or ""),
+            tool_kind=str(item.get("tool_kind") or "") or None,
+            tool_payload=item.get("tool_payload"),
+        )
+        for item in get_conversation_turns(conversation_id=conversation_id)
     ]
 
 

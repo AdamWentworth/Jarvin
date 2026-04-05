@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import backend.agent.chat_tools as chat_tools
+import backend.agent.workspace_tools as workspace_tools
 from backend.agent.external_tools import (
     CalendarAgendaResult,
     CalendarEventDetails,
@@ -8,9 +9,7 @@ from backend.agent.external_tools import (
     CalendarEventSummary,
     WebPageExtract,
     WebResearchResult,
-    WeatherResult,
     WebSearchItem,
-    WebSearchResult,
 )
 from backend.agent.pending_actions import clear_pending_calendar_action
 
@@ -65,15 +64,19 @@ def test_web_command_formats_results(monkeypatch):
 def test_weather_command_formats_forecast(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
-        "get_weather",
-        lambda location: WeatherResult(
-            location_label="Seattle, Washington, United States",
-            forecast_summary="Partly cloudy",
-            temperature="58°",
-            feels_like="56°",
-            wind="8 mph",
-            daily_outlook="High 61°, low 49°, precip 20%",
-        ),
+        "maybe_handle_weather_request",
+        lambda text, conversation_id=None: type(
+            "WeatherTool",
+            (),
+            {
+                "reply": "Today in Seattle, Washington, United States: Partly cloudy. It is 58° right now.",
+                "payload": {
+                    "location_label": "Seattle, Washington, United States",
+                    "summary": "Partly cloudy",
+                    "icon_name": "cloud-sun",
+                },
+            },
+        )(),
         raising=True,
     )
 
@@ -81,6 +84,8 @@ def test_weather_command_formats_forecast(monkeypatch):
     assert response.handled is True
     assert "Seattle" in response.reply
     assert "Partly cloudy" in response.reply
+    assert response.tool_kind == "weather"
+    assert response.tool_payload["icon_name"] == "cloud-sun"
 
 
 def test_brief_command_uses_briefing_tooling(monkeypatch):
@@ -146,21 +151,27 @@ def test_google_command_warns_when_provider_is_not_google(monkeypatch):
 def test_natural_language_weather_request_is_handled(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
-        "get_weather",
-        lambda location: WeatherResult(
-            location_label="Seattle, Washington, United States",
-            forecast_summary="Clear sky",
-            temperature="46°",
-            feels_like="43°",
-            wind="3 mph",
-            daily_outlook="High 52°, low 40°, precip 0%",
-        ),
+        "maybe_handle_weather_request",
+        lambda text, conversation_id=None: type(
+            "WeatherTool",
+            (),
+            {
+                "reply": "Today in Seattle, Washington, United States: Clear sky.",
+                "payload": {
+                    "location_label": "Seattle, Washington, United States",
+                    "summary": "Clear sky",
+                    "icon_name": "sun",
+                },
+            },
+        )(),
         raising=True,
     )
 
     response = chat_tools.maybe_handle_assistant_tool_request("What's the weather in Seattle?")
     assert response.handled is True
     assert "Clear sky" in response.reply
+    assert response.tool_kind == "weather"
+    assert response.tool_payload["icon_name"] == "sun"
 
 
 def test_natural_language_calendar_request_reports_missing_setup(monkeypatch):
@@ -169,6 +180,88 @@ def test_natural_language_calendar_request_reports_missing_setup(monkeypatch):
     response = chat_tools.maybe_handle_assistant_tool_request("What's on my calendar tomorrow?")
     assert response.handled is True
     assert "OAuth credentials" in response.reply
+
+
+def test_natural_language_google_calendar_lookup_uses_calendar_not_search(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_calendar_request",
+        lambda text, conversation_id=None: chat_tools.CalendarPlan(
+            is_calendar_request=True,
+            action="lookup",
+            window_days=7,
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(chat_tools, "google_calendar_credentials_configured", lambda: True, raising=True)
+    monkeypatch.setattr(chat_tools, "google_calendar_token_available", lambda: True, raising=True)
+    monkeypatch.setattr(
+        chat_tools,
+        "get_calendar_agenda",
+        lambda window_days=7: CalendarAgendaResult(
+            calendar_id="primary",
+            window_days=window_days,
+            events=[
+                CalendarEventSummary(
+                    starts_at="2026-04-04 09:00 AM",
+                    title="Morning standup",
+                    location="Home office",
+                )
+            ],
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "browse_search_results",
+        lambda query: (_ for _ in ()).throw(AssertionError("web search should not run for Google Calendar lookup")),
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "Please just look at my Google Calendar and tell me what I have this week."
+    )
+
+    assert response.handled is True
+    assert "Morning standup" in response.reply
+
+
+def test_natural_language_calendar_follow_up_week_lookup_is_handled(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_calendar_request",
+        lambda text, conversation_id=None: chat_tools.CalendarPlan(
+            is_calendar_request=True,
+            action="lookup",
+            window_days=7,
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(chat_tools, "google_calendar_credentials_configured", lambda: True, raising=True)
+    monkeypatch.setattr(chat_tools, "google_calendar_token_available", lambda: True, raising=True)
+    monkeypatch.setattr(
+        chat_tools,
+        "get_calendar_agenda",
+        lambda window_days=7: CalendarAgendaResult(
+            calendar_id="primary",
+            window_days=window_days,
+            events=[
+                CalendarEventSummary(
+                    starts_at="2026-04-05 01:00 PM",
+                    title="Project sync",
+                    location="Zoom",
+                )
+            ],
+        ),
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "How about instead if you just look at all the events for the upcoming week and give me anything that's actually real"
+    )
+
+    assert response.handled is True
+    assert "Project sync" in response.reply
 
 
 def test_natural_language_google_request_falls_back_when_google_is_not_configured(monkeypatch):
@@ -213,6 +306,20 @@ def test_natural_language_repo_search_is_handled(monkeypatch):
     assert "include_router" in response.reply
 
 
+def test_fuzzy_workspace_repo_search_is_handled(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "_repo_search_reply",
+        lambda query: f"Search results for `{query}`:\n- `backend/api/app.py:1` include_router(...)",
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request("Could you look through the codebase for include_router?")
+
+    assert response.handled is True
+    assert "include_router" in response.reply
+
+
 def test_natural_language_run_is_handled(monkeypatch):
     monkeypatch.setattr(chat_tools, "_run_reply", lambda command: f"Command `{command}` exited with `0`.", raising=True)
 
@@ -221,11 +328,20 @@ def test_natural_language_run_is_handled(monkeypatch):
     assert "git status" in response.reply
 
 
+def test_fuzzy_workspace_git_question_is_handled(monkeypatch):
+    monkeypatch.setattr(chat_tools, "_run_reply", lambda command: f"Command `{command}` exited with `0`.", raising=True)
+
+    response = chat_tools.maybe_handle_assistant_tool_request("What changed recently in the repo?")
+
+    assert response.handled is True
+    assert "git diff --stat" in response.reply
+
+
 def test_natural_language_reminder_request_is_handled(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
         "maybe_handle_reminder_request",
-        lambda text: "Saved reminder `call mom` for `2026-04-05 05:00 PM`.",
+        lambda text, conversation_id=None: "Saved reminder `call mom` for `2026-04-05 05:00 PM`.",
         raising=True,
     )
 
@@ -596,3 +712,102 @@ def test_natural_language_calendar_reschedule_requires_confirmation(monkeypatch)
         assert "Rescheduled `Project sync`" in confirmed.reply
     finally:
         clear_pending_calendar_action(conversation_id)
+
+
+def test_fuzzy_calendar_reschedule_phrase_is_handled(monkeypatch):
+    conversation_id = 15
+    clear_pending_calendar_action(conversation_id)
+
+    monkeypatch.setattr(
+        chat_tools,
+        "find_calendar_events",
+        lambda query: [
+            CalendarEventMatch(
+                event_id="evt-4",
+                title="Project sync",
+                starts_at="2026-04-07T13:00:00-07:00",
+                ends_at="2026-04-07T14:00:00-07:00",
+                location="Conference room",
+            )
+        ],
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "prepare_reschedule_times",
+        lambda event, when_text: ("2026-04-07T14:00:00-07:00", "2026-04-07T15:00:00-07:00"),
+        raising=True,
+    )
+
+    try:
+        response = chat_tools.maybe_handle_assistant_tool_request(
+            "Shift project sync back an hour on my calendar",
+            conversation_id=conversation_id,
+        )
+
+        assert response.handled is True
+        assert "Reply `yes` to move it" in response.reply
+    finally:
+        clear_pending_calendar_action(conversation_id)
+
+
+def test_contextual_calendar_location_follow_up_is_handled(monkeypatch):
+    conversation_id = 16
+    clear_pending_calendar_action(conversation_id)
+    chat_tools.maybe_plan_calendar_request("Show event details for project sync on my calendar", conversation_id=conversation_id)
+
+    monkeypatch.setattr(
+        chat_tools,
+        "find_calendar_events",
+        lambda query: [
+            CalendarEventMatch(
+                event_id="evt-5",
+                title="Project sync",
+                starts_at="2026-04-07T13:00:00-07:00",
+                ends_at="2026-04-07T14:00:00-07:00",
+                location="Conference room",
+            )
+        ],
+        raising=True,
+    )
+
+    try:
+        response = chat_tools.maybe_handle_assistant_tool_request(
+            "Make Zoom the location for that meeting",
+            conversation_id=conversation_id,
+        )
+
+        assert response.handled is True
+        assert "location -> `Zoom`" in response.reply
+    finally:
+        clear_pending_calendar_action(conversation_id)
+
+
+def test_workspace_read_follow_up_show_more_is_handled(monkeypatch):
+    conversation_id = 17
+    calls = []
+
+    monkeypatch.setattr(
+        chat_tools,
+        "_read_file_reply",
+        lambda path, start_line=1, end_line=None: calls.append((path, start_line, end_line)) or f"Read `{path}` from {start_line}",
+        raising=True,
+    )
+
+    try:
+        first = chat_tools.maybe_handle_assistant_tool_request(
+            "Pull up backend/api/app.py lines 1 to 20",
+            conversation_id=conversation_id,
+        )
+        second = chat_tools.maybe_handle_assistant_tool_request(
+            "show me more",
+            conversation_id=conversation_id,
+        )
+
+        assert first.handled is True
+        assert second.handled is True
+        assert calls[0] == ("backend/api/app.py", 1, 20)
+        assert calls[1][0] == "backend/api/app.py"
+        assert calls[1][1] == 21
+    finally:
+        workspace_tools.clear_workspace_context(conversation_id)

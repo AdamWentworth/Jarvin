@@ -47,12 +47,20 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
             except Exception as exc:
                 log.exception("Tool reply speech synthesis failed: %s", exc)
         append_turn("user", text, conversation_id=payload.conversation_id)
-        append_turn("assistant", tool_response.reply, conversation_id=payload.conversation_id)
+        append_turn(
+            "assistant",
+            tool_response.reply,
+            conversation_id=payload.conversation_id,
+            tool_kind=tool_response.tool_kind,
+            tool_payload=tool_response.tool_payload,
+        )
         return ChatResponse(
             reply=tool_response.reply,
             mode_used="agent_tool",
             conversation_id=payload.conversation_id,
             tts_url=tts_url,
+            tool_kind=tool_response.tool_kind,
+            tool_payload=tool_response.tool_payload,
         )
 
     cfg = build_jarvin_config(

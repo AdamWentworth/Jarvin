@@ -1,5 +1,25 @@
 export type ChatMode = "voice_fast" | "chat_balanced" | "agent_strong";
 
+export interface WeatherToolPayload {
+  location_query: string;
+  location_label: string;
+  target_label: string;
+  date_label: string;
+  summary: string;
+  icon_name: string;
+  temperature: string;
+  feels_like: string;
+  temperature_value?: number | null;
+  feels_like_value?: number | null;
+  high_value?: number | null;
+  low_value?: number | null;
+  precipitation_probability?: number | null;
+  wind: string;
+  daily_outlook: string;
+  is_current_day: boolean;
+  source: string;
+}
+
 export interface UserProfilePayload {
   name: string;
   goal: string;
@@ -19,6 +39,8 @@ export interface ConversationSummary {
 export interface ConversationTurn {
   role: "user" | "assistant" | string;
   message: string;
+  tool_kind?: string | null;
+  tool_payload?: WeatherToolPayload | Record<string, unknown> | null;
 }
 
 export interface WorkspaceBootstrapResponse {
@@ -39,6 +61,8 @@ export interface ChatResponse {
   mode_used: ChatMode | string;
   conversation_id: number | null;
   tts_url?: string | null;
+  tool_kind?: string | null;
+  tool_payload?: WeatherToolPayload | Record<string, unknown> | null;
 }
 
 export interface TranscribeResponse {

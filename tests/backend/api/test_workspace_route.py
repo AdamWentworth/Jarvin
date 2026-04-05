@@ -22,8 +22,19 @@ def _install_fake_workspace(monkeypatch):
             {"id": 1, "title": "Older chat", "created_at": "2026-04-03T12:00:00Z"},
         ],
         "history": {
-            2: [("user", "hello"), ("assistant", "hi there")],
-            1: [("user", "old"), ("assistant", "older")],
+            2: [
+                {"role": "user", "message": "hello", "tool_kind": None, "tool_payload": None},
+                {
+                    "role": "assistant",
+                    "message": "hi there",
+                    "tool_kind": "weather",
+                    "tool_payload": {"summary": "Partly cloudy", "icon_name": "cloud-sun"},
+                },
+            ],
+            1: [
+                {"role": "user", "message": "old", "tool_kind": None, "tool_payload": None},
+                {"role": "assistant", "message": "older", "tool_kind": None, "tool_payload": None},
+            ],
         },
         "next_id": 3,
     }
@@ -48,7 +59,7 @@ def _install_fake_workspace(monkeypatch):
     def get_active_conversation_id():
         return int(state["active"])
 
-    def get_conversation_history(conversation_id=None):
+    def get_conversation_turns(conversation_id=None):
         cid = int(conversation_id if conversation_id is not None else state["active"])
         return list(state["history"].get(cid, []))
 
@@ -89,7 +100,7 @@ def _install_fake_workspace(monkeypatch):
     monkeypatch.setattr(workspace_mod, "set_user_profile", set_user_profile, raising=True)
     monkeypatch.setattr(workspace_mod, "list_conversations", list_conversations, raising=True)
     monkeypatch.setattr(workspace_mod, "get_active_conversation_id", get_active_conversation_id, raising=True)
-    monkeypatch.setattr(workspace_mod, "get_conversation_history", get_conversation_history, raising=True)
+    monkeypatch.setattr(workspace_mod, "get_conversation_turns", get_conversation_turns, raising=True)
     monkeypatch.setattr(workspace_mod, "new_conversation", new_conversation, raising=True)
     monkeypatch.setattr(workspace_mod, "set_active_conversation", set_active_conversation, raising=True)
     monkeypatch.setattr(workspace_mod, "rename_conversation", rename_conversation, raising=True)
@@ -109,6 +120,8 @@ async def test_workspace_bootstrap_returns_profile_and_active_history(monkeypatc
     assert len(resp.conversations) == 2
     assert resp.conversations[0].is_active is True
     assert resp.history[0].message == "hello"
+    assert resp.history[1].tool_kind == "weather"
+    assert resp.history[1].tool_payload["icon_name"] == "cloud-sun"
 
 
 @pytest.mark.asyncio
@@ -157,7 +170,9 @@ async def test_conversation_mutations_return_updated_workspace(monkeypatch):
 async def test_delete_conversation_blocks_only_remaining_chat(monkeypatch):
     state = _install_fake_workspace(monkeypatch)
     state["conversations"] = [{"id": 2, "title": "Only chat", "created_at": None}]
-    state["history"] = {2: [("user", "hello")]}
+    state["history"] = {
+        2: [{"role": "user", "message": "hello", "tool_kind": None, "tool_payload": None}],
+    }
     state["active"] = 2
 
     with pytest.raises(HTTPException) as exc:

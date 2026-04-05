@@ -1,5 +1,6 @@
 # backend/api/schemas.py
 from __future__ import annotations
+from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 
@@ -50,6 +51,8 @@ class ChatResponse(_StrictModel):
     mode_used: str
     conversation_id: int | None = None
     tts_url: str | None = None
+    tool_kind: str | None = None
+    tool_payload: dict[str, Any] | None = None
 
 
 class UserProfilePayload(_StrictModel):
@@ -71,6 +74,8 @@ class ConversationSummary(_StrictModel):
 class ConversationTurn(_StrictModel):
     role: str
     message: str
+    tool_kind: str | None = None
+    tool_payload: dict[str, Any] | None = None
 
 
 class WorkspaceBootstrapResponse(_StrictModel):

@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 import re
 
+from backend.agent.reminder_planner import (
+    clear_reminder_context,
+    get_reminder_context,
+    maybe_plan_reminder_request,
+    remember_reminder_context,
+)
 from memory.reminders import (
     advance_due_at,
     complete_reminder,
@@ -71,40 +77,93 @@ class ReminderDraft:
     recurrence: str = "once"
 
 
-def maybe_handle_reminder_request(text: str) -> str | None:
+def maybe_handle_reminder_request(text: str, *, conversation_id: int | None = None) -> str | None:
     message = (text or "").strip()
     if not message:
         return None
 
-    if _LIST_ROUTINES_RE.search(message):
-        return _list_reply(routines_only=True, window="upcoming")
+    try:
+        if _should_try_planner_first(message, conversation_id=conversation_id):
+            planner_reply = _maybe_execute_planned_reminder(message, conversation_id=conversation_id)
+            if planner_reply is not None:
+                return planner_reply
 
-    if _LIST_RE.search(message):
-        return _list_reply(routines_only=False, window=_infer_list_window(message))
+        if _LIST_ROUTINES_RE.search(message):
+            return _list_reply(routines_only=True, window="upcoming", conversation_id=conversation_id)
 
-    complete_match = _COMPLETE_RE.search(message)
-    if complete_match:
-        return _complete_reply(_clean_text(complete_match.group("query")))
+        if _LIST_RE.search(message):
+            return _list_reply(
+                routines_only=False,
+                window=_infer_list_window(message),
+                conversation_id=conversation_id,
+            )
 
-    delete_match = _DELETE_RE.search(message)
-    if delete_match:
-        return _delete_reply(_clean_text(delete_match.group("query")))
+        complete_match = _COMPLETE_RE.search(message)
+        if complete_match:
+            return _complete_reply(_clean_text(complete_match.group("query")), conversation_id=conversation_id)
 
-    move_match = _MOVE_RE.search(message)
-    if move_match:
-        return _move_reply(_clean_text(move_match.group("query")), _clean_text(move_match.group("when")))
+        delete_match = _DELETE_RE.search(message)
+        if delete_match:
+            return _delete_reply(_clean_text(delete_match.group("query")), conversation_id=conversation_id)
 
-    draft = _parse_reminder_draft(message)
-    if draft is None:
-        return None
+        move_match = _MOVE_RE.search(message)
+        if move_match:
+            return _move_reply(
+                _clean_text(move_match.group("query")),
+                _clean_text(move_match.group("when")),
+                conversation_id=conversation_id,
+            )
 
-    created = create_reminder(draft.title, due_at=draft.due_at, recurrence=draft.recurrence)
-    recurrence_note = (
-        f" This will repeat `{created['recurrence']}`."
-        if created["recurrence"] != "once"
-        else ""
+        legacy_error: ValueError | None = None
+        try:
+            draft = _parse_reminder_draft(message)
+        except ValueError as exc:
+            draft = None
+            legacy_error = exc
+        if draft is None:
+            planner_reply = _maybe_execute_planned_reminder(message, conversation_id=conversation_id)
+            if planner_reply is not None:
+                return planner_reply
+            if legacy_error is not None:
+                return str(legacy_error)
+            return None
+
+        created = create_reminder(draft.title, due_at=draft.due_at, recurrence=draft.recurrence)
+        remember_reminder_context(conversation_id, action="create", last_title=str(created["title"]))
+        recurrence_note = (
+            f" This will repeat `{created['recurrence']}`."
+            if created["recurrence"] != "once"
+            else ""
+        )
+        return f"Saved reminder `{created['title']}` for `{_display_due(created['due_at'])}`.{recurrence_note}"
+    except ValueError as exc:
+        return str(exc)
+
+
+def _should_try_planner_first(message: str, *, conversation_id: int | None) -> bool:
+    lower = message.lower()
+    if get_reminder_context(conversation_id) is not None:
+        return True
+    return any(
+        token in lower
+        for token in (
+            "nudge me",
+            "don't let me forget",
+            "dont let me forget",
+            "remember to",
+            "make sure i remember",
+            "after lunch",
+            "before ",
+            "note to self",
+        )
     )
-    return f"Saved reminder `{created['title']}` for `{_display_due(created['due_at'])}`.{recurrence_note}"
+
+
+def _maybe_execute_planned_reminder(message: str, *, conversation_id: int | None) -> str | None:
+    plan = maybe_plan_reminder_request(message, conversation_id=conversation_id)
+    if plan is None or plan.action == "unknown":
+        return None
+    return _execute_reminder_plan(plan, conversation_id=conversation_id)
 
 
 def handle_reminder_command(rest: str) -> str:
@@ -181,7 +240,60 @@ def _parse_reminder_draft(message: str) -> ReminderDraft | None:
     )
 
 
-def _list_reply(*, routines_only: bool, window: str) -> str:
+def _execute_reminder_plan(plan, *, conversation_id: int | None) -> str:
+    action = str(plan.action or "").strip().lower()
+    if action == "list_routines":
+        return _list_reply(routines_only=True, window=plan.window or "upcoming", conversation_id=conversation_id)
+    if action == "list":
+        return _list_reply(routines_only=False, window=plan.window or "upcoming", conversation_id=conversation_id)
+    if action == "complete":
+        query = _resolve_query_text(plan.query, conversation_id=conversation_id)
+        if not query:
+            raise ValueError("Tell me which reminder to mark done.")
+        return _complete_reply(query, conversation_id=conversation_id)
+    if action == "delete":
+        query = _resolve_query_text(plan.query, conversation_id=conversation_id)
+        if not query:
+            raise ValueError("Tell me which reminder to delete.")
+        return _delete_reply(query, conversation_id=conversation_id)
+    if action == "move":
+        query = _resolve_query_text(plan.query, conversation_id=conversation_id)
+        if not query:
+            raise ValueError("Tell me which reminder to move.")
+        when_text = _clean_text(plan.when_text or plan.due_at_iso or "")
+        if not when_text:
+            raise ValueError("Tell me when you want that reminder moved to.")
+        return _move_reply(query, when_text, conversation_id=conversation_id)
+    if action == "create":
+        title = _clean_text(plan.title or "")
+        recurrence = _normalize_planner_recurrence(plan.recurrence)
+        due_at = _coerce_plan_due(plan)
+        if not title:
+            raise ValueError("Tell me what you want me to remind you about.")
+        if due_at is None:
+            remember_reminder_context(
+                conversation_id,
+                action="awaiting_time",
+                last_title=title,
+                awaiting_time_title=title,
+                awaiting_time_recurrence=recurrence,
+            )
+            return (
+                f"What time should I set reminder `{title}` for? "
+                "You can say something like `tomorrow at 5pm` or `in 30 minutes`."
+            )
+        created = create_reminder(title, due_at=due_at, recurrence=recurrence)
+        remember_reminder_context(conversation_id, action="create", last_title=str(created["title"]))
+        recurrence_note = (
+            f" This will repeat `{created['recurrence']}`."
+            if created["recurrence"] != "once"
+            else ""
+        )
+        return f"Saved reminder `{created['title']}` for `{_display_due(created['due_at'])}`.{recurrence_note}"
+    return None
+
+
+def _list_reply(*, routines_only: bool, window: str, conversation_id: int | None = None) -> str:
     if routines_only:
         reminders = list_reminders(status="pending", recurrence="daily", limit=100) + list_reminders(
             status="pending",
@@ -191,6 +303,7 @@ def _list_reply(*, routines_only: bool, window: str) -> str:
         reminders = sorted(reminders, key=lambda item: item["due_at"])
         if not reminders:
             return "You do not have any active routines yet."
+        remember_reminder_context(conversation_id, action="list_routines", last_title=str(reminders[0]["title"]))
         lines = [
             f"- `{item['title']}` at `{_display_due(item['due_at'])}` (`{item['recurrence']}`)"
             for item in reminders[:20]
@@ -226,6 +339,7 @@ def _list_reply(*, routines_only: bool, window: str) -> str:
     if not reminders:
         return f"You do not have any pending reminders for {label}."
 
+    remember_reminder_context(conversation_id, action="list", last_title=str(reminders[0]["title"]))
     lines = []
     for item in reminders[:20]:
         recurrence = f" ({item['recurrence']})" if item["recurrence"] != "once" else ""
@@ -234,10 +348,11 @@ def _list_reply(*, routines_only: bool, window: str) -> str:
     return f"Pending reminders for {label}:\n" + "\n".join(lines)
 
 
-def _complete_reply(query: str) -> str:
+def _complete_reply(query: str, *, conversation_id: int | None = None) -> str:
     matches = find_reminders(query, include_done=False, limit=5)
     reminder = _pick_single_match(matches, query)
     updated = complete_reminder(int(reminder["id"]))
+    remember_reminder_context(conversation_id, action="complete", last_title=str(updated["title"]))
     if updated["recurrence"] == "once":
         return f"Marked `{updated['title']}` as done."
     return (
@@ -246,14 +361,15 @@ def _complete_reply(query: str) -> str:
     )
 
 
-def _delete_reply(query: str) -> str:
+def _delete_reply(query: str, *, conversation_id: int | None = None) -> str:
     matches = find_reminders(query, include_done=True, limit=5)
     reminder = _pick_single_match(matches, query)
     deleted = delete_reminder(int(reminder["id"]))
+    clear_reminder_context(conversation_id)
     return f"Deleted reminder `{deleted['title']}`."
 
 
-def _move_reply(query: str, when_text: str) -> str:
+def _move_reply(query: str, when_text: str, *, conversation_id: int | None = None) -> str:
     matches = find_reminders(query, include_done=False, limit=5)
     reminder = _pick_single_match(matches, query)
     due_at = _parse_due_text(when_text)
@@ -261,7 +377,47 @@ def _move_reply(query: str, when_text: str) -> str:
     if updated["recurrence"] != "once":
         advanced = advance_due_at(updated["due_at"], updated["recurrence"], now=datetime.now().astimezone() - timedelta(seconds=1))
         updated = update_reminder(int(reminder["id"]), due_at=advanced)
+    remember_reminder_context(conversation_id, action="move", last_title=str(updated["title"]))
     return f"Moved `{updated['title']}` to `{_display_due(updated['due_at'])}`."
+
+
+def _resolve_query_text(query: str | None, *, conversation_id: int | None) -> str:
+    cleaned = _clean_text(query or "")
+    if cleaned:
+        return cleaned
+    context = get_reminder_context(conversation_id)
+    if context and context.last_title:
+        return context.last_title
+    return ""
+
+
+def _normalize_planner_recurrence(value: str | None) -> str:
+    if value is None:
+        return "once"
+    lowered = _clean_text(value or "")
+    if not lowered:
+        return "once"
+    lowered = lowered.lower()
+    if lowered in {"once", "daily", "weekday", "weekly"}:
+        return lowered
+    raise ValueError(
+        "I can handle one-time, daily, weekday, or weekly reminders right now. "
+        f"I don't support `{lowered}` reminders yet."
+    )
+
+
+def _coerce_plan_due(plan) -> datetime | None:
+    due_at_iso = _clean_text(plan.due_at_iso or "")
+    if due_at_iso:
+        normalized = due_at_iso.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        return parsed.astimezone()
+    when_text = _clean_text(plan.when_text or "")
+    if when_text:
+        return _parse_due_text(when_text)
+    return None
 
 
 def _pick_single_match(matches: list[dict[str, object]], query: str) -> dict[str, object]:
@@ -379,32 +535,50 @@ def _next_weekday(base_date: date, weekday: int, *, allow_today: bool) -> date:
 def _extract_time(text: str) -> time | None:
     if not text:
         return None
+    if "after lunch" in text:
+        return time(hour=13, minute=0)
+    if "before lunch" in text:
+        return time(hour=11, minute=30)
+    if "lunchtime" in text or "lunch" in text:
+        return time(hour=12, minute=0)
     if "noon" in text:
         return time(hour=12, minute=0)
     if "midnight" in text:
         return time(hour=0, minute=0)
-    if "this morning" in text:
+    if "this morning" in text or re.search(r"\bmorning\b", text):
         return time(hour=9, minute=0)
-    if "this afternoon" in text:
+    if "this afternoon" in text or re.search(r"\bafternoon\b", text):
         return time(hour=15, minute=0)
-    if "this evening" in text or "tonight" in text:
+    if "this evening" in text or "tonight" in text or re.search(r"\bevening\b", text):
         return time(hour=19, minute=0)
+
+    before_match = re.search(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", text)
+    if before_match:
+        target_minutes = _time_match_to_minutes(before_match.group(1), before_match.group(2), before_match.group(3))
+        target_minutes = max(0, target_minutes - 30)
+        return time(hour=target_minutes // 60, minute=target_minutes % 60)
 
     match = re.search(r"\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", text)
     if not match:
         return None
-    hour = int(match.group(1))
-    minute = int(match.group(2) or 0)
-    meridiem = match.group(3)
+    total_minutes = _time_match_to_minutes(match.group(1), match.group(2), match.group(3))
+    hour = total_minutes // 60
+    minute = total_minutes % 60
+    if hour > 23 or minute > 59:
+        raise ValueError("I couldn't understand that reminder time.")
+    return time(hour=hour, minute=minute)
+
+
+def _time_match_to_minutes(hour_text: str, minute_text: str | None, meridiem_text: str | None) -> int:
+    hour = int(hour_text)
+    minute = int(minute_text or 0)
+    meridiem = (meridiem_text or "").lower()
     if meridiem:
-        meridiem = meridiem.lower()
         if meridiem == "pm" and hour != 12:
             hour += 12
         if meridiem == "am" and hour == 12:
             hour = 0
-    if hour > 23 or minute > 59:
-        raise ValueError("I couldn't understand that reminder time.")
-    return time(hour=hour, minute=minute)
+    return (hour * 60) + minute
 
 
 def _default_time_for_phrase(text: str) -> time:

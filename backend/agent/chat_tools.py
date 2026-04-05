@@ -11,9 +11,20 @@ from backend.agent.briefing_tools import (
     handle_brief_command,
     maybe_handle_brief_request,
 )
+from backend.agent.calendar_tools import (
+    CalendarPlan,
+    maybe_plan_calendar_request,
+)
 from backend.agent.reminder_tools import (
     handle_reminder_command,
     maybe_handle_reminder_request,
+)
+from backend.agent.weather_tools import (
+    maybe_handle_weather_request,
+)
+from backend.agent.workspace_tools import (
+    maybe_plan_workspace_request,
+    remember_workspace_context,
 )
 from backend.ai_engine import build_jarvin_config, generate_reply
 from backend.agent.external_tools import (
@@ -137,6 +148,8 @@ _CANCEL_PATTERNS = {
 class ToolChatResponse:
     handled: bool
     reply: str = ""
+    tool_kind: str | None = None
+    tool_payload: dict[str, object] | None = None
 
 
 def maybe_handle_assistant_tool_request(text: str, *, conversation_id: int | None = None) -> ToolChatResponse:
@@ -179,7 +192,7 @@ def maybe_handle_tool_command(text: str, *, conversation_id: int | None = None) 
     if verb == "google":
         return _safe_tool_call(lambda: _google_search_reply(rest, natural=False), "I couldn't use Google search just now.")
     if verb == "weather":
-        return _safe_tool_call(lambda: _weather_reply(rest), "I couldn't check the weather just now.")
+        return _safe_weather_tool_response(rest, conversation_id=conversation_id)
     if verb == "brief":
         return _safe_tool_call(lambda: handle_brief_command(rest), "I couldn't build the morning brief just now.")
     if verb == "reminder":
@@ -204,13 +217,25 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
     if _CALENDAR_AUTH_RE.search(message):
         return _safe_tool_call(lambda: begin_google_calendar_auth(), "I couldn't start Google Calendar authorization.")
 
+    weather_reply = _maybe_weather_tool_response(message, conversation_id=conversation_id)
+    if weather_reply is not None:
+        return weather_reply
+
     brief_reply = maybe_handle_brief_request(message)
     if brief_reply is not None:
         return ToolChatResponse(handled=True, reply=brief_reply)
 
-    reminder_reply = maybe_handle_reminder_request(message)
+    reminder_reply = maybe_handle_reminder_request(message, conversation_id=conversation_id)
     if reminder_reply is not None:
         return ToolChatResponse(handled=True, reply=reminder_reply)
+
+    calendar_reply = _maybe_calendar_tool_response(message, conversation_id=conversation_id)
+    if calendar_reply is not None:
+        return calendar_reply
+
+    workspace_reply = _maybe_workspace_tool_response(message, conversation_id=conversation_id)
+    if workspace_reply is not None:
+        return workspace_reply
 
     details_match = _CALENDAR_DETAILS_RE.search(message)
     if details_match:
@@ -405,6 +430,172 @@ def _safe_tool_call(fn: Callable[[], str], fallback: str) -> ToolChatResponse:
         return ToolChatResponse(handled=True, reply=fallback)
 
 
+def _safe_weather_tool_response(rest: str, *, conversation_id: int | None) -> ToolChatResponse:
+    try:
+        response = maybe_handle_weather_request(f"weather for {rest}".strip(), conversation_id=conversation_id)
+        if response is None:
+            return ToolChatResponse(handled=True, reply="I couldn't understand that weather request yet.")
+        return ToolChatResponse(
+            handled=True,
+            reply=response.reply,
+            tool_kind="weather" if response.payload else None,
+            tool_payload=response.payload or None,
+        )
+    except Exception as exc:
+        detail = str(exc).strip()
+        return ToolChatResponse(
+            handled=True,
+            reply=f"I couldn't check the weather just now. {detail}".strip(),
+        )
+
+
+def _maybe_weather_tool_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
+    try:
+        response = maybe_handle_weather_request(text, conversation_id=conversation_id)
+    except Exception as exc:
+        detail = str(exc).strip()
+        return ToolChatResponse(
+            handled=True,
+            reply=f"I couldn't check the weather just now. {detail}".strip(),
+        )
+    if response is None:
+        return None
+    return ToolChatResponse(
+        handled=True,
+        reply=response.reply,
+        tool_kind="weather" if response.payload else None,
+        tool_payload=response.payload or None,
+    )
+
+
+def _maybe_calendar_tool_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
+    plan = maybe_plan_calendar_request(text, conversation_id=conversation_id)
+    if plan is None:
+        return None
+    try:
+        return ToolChatResponse(
+            handled=True,
+            reply=_execute_calendar_plan(plan, raw_message=text, conversation_id=conversation_id),
+        )
+    except Exception as exc:
+        detail = str(exc).strip()
+        return ToolChatResponse(
+            handled=True,
+            reply=f"I couldn't work with your calendar just now. {detail}".strip(),
+        )
+
+
+def _maybe_workspace_tool_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
+    plan = maybe_plan_workspace_request(text, conversation_id=conversation_id)
+    if plan is None or plan.action == "unknown":
+        return None
+    try:
+        return ToolChatResponse(
+            handled=True,
+            reply=_execute_workspace_plan(plan, conversation_id=conversation_id),
+        )
+    except Exception as exc:
+        detail = str(exc).strip()
+        return ToolChatResponse(
+            handled=True,
+            reply=f"I couldn't work with the local workspace just now. {detail}".strip(),
+        )
+
+
+def _execute_calendar_plan(plan: CalendarPlan, *, raw_message: str, conversation_id: int | None) -> str:
+    action = (plan.action or "lookup").strip().lower()
+
+    if action == "auth":
+        return begin_google_calendar_auth()
+
+    if action == "lookup":
+        return _calendar_lookup_reply(raw_message, window_days_override=plan.window_days)
+
+    if action == "create":
+        details = plan.query or _extract_calendar_create_text(raw_message)
+        if not details:
+            raise ValueError("Tell me what event to create and when it should happen.")
+        return _calendar_create_reply(details)
+
+    if action == "details":
+        query = plan.query or raw_message
+        return _calendar_details_reply(query)
+
+    if action == "delete":
+        query = plan.query or raw_message
+        return _calendar_delete_request_reply(query, conversation_id=conversation_id)
+
+    if action == "rename":
+        query = plan.query or raw_message
+        if not plan.new_title:
+            raise ValueError("Tell me the new event title too.")
+        return _calendar_update_request_reply(query, conversation_id=conversation_id, title=plan.new_title)
+
+    if action == "update_location":
+        query = plan.query or raw_message
+        if plan.new_location is None:
+            raise ValueError("Tell me the new event location too.")
+        return _calendar_update_request_reply(query, conversation_id=conversation_id, location=plan.new_location)
+
+    if action == "update_description":
+        query = plan.query or raw_message
+        if plan.new_description is None:
+            raise ValueError("Tell me the new event notes too.")
+        return _calendar_update_request_reply(query, conversation_id=conversation_id, description=plan.new_description)
+
+    if action == "move":
+        query = plan.query or raw_message
+        when_text = plan.when_text or raw_message
+        return _calendar_move_request_reply(query, when_text, conversation_id=conversation_id)
+
+    return _calendar_lookup_reply(raw_message, window_days_override=plan.window_days)
+
+
+def _execute_workspace_plan(plan, *, conversation_id: int | None) -> str:
+    action = str(plan.action or "").strip().lower()
+
+    if action == "search_repo":
+        query = _clean_query(plan.query or "")
+        if not query:
+            raise ValueError("Tell me what to search for in the repo.")
+        reply = _repo_search_reply(query)
+        remember_workspace_context(conversation_id, action="search_repo", query=query)
+        return reply
+
+    if action == "read_file":
+        path = _clean_query(plan.path or "")
+        if not path:
+            raise ValueError("Tell me which file to read.")
+        start_line = int(plan.start_line or 1)
+        end_line = int(plan.end_line) if plan.end_line is not None else None
+        reply = _read_file_reply(path, start_line, end_line)
+        inferred_end = end_line if end_line is not None else start_line + int(cfg.settings.agent_max_file_read_lines) - 1
+        remember_workspace_context(
+            conversation_id,
+            action="read_file",
+            path=path,
+            start_line=start_line,
+            end_line=inferred_end,
+        )
+        return reply
+
+    if action == "list_directory":
+        path = _clean_query(plan.path or ".") or "."
+        reply = _list_reply(path)
+        remember_workspace_context(conversation_id, action="list_directory", path=path)
+        return reply
+
+    if action == "run_command":
+        command = _clean_query(plan.command or "")
+        if not command:
+            raise ValueError("Tell me which safe command to run.")
+        reply = _run_reply(command)
+        remember_workspace_context(conversation_id, action="run_command", command=command)
+        return reply
+
+    raise ValueError(f"Unsupported workspace action `{action}`.")
+
+
 def _calendar_command_reply(rest: str, *, conversation_id: int | None) -> str:
     lower = rest.lower()
     if lower == "auth":
@@ -546,7 +737,7 @@ def _calendar_update_request_reply(
     )
 
 
-def _calendar_lookup_reply(raw: str) -> str:
+def _calendar_lookup_reply(raw: str, *, window_days_override: int | None = None) -> str:
     if not google_calendar_credentials_configured():
         creds_path = cfg.settings.google_calendar_credentials_file
         return (
@@ -560,7 +751,7 @@ def _calendar_lookup_reply(raw: str) -> str:
             "Ask me to connect or authorize your Google Calendar and I will start the OAuth flow."
         )
 
-    window_days = _infer_calendar_window_days(raw)
+    window_days = int(window_days_override or _infer_calendar_window_days(raw))
     agenda = get_calendar_agenda(window_days=window_days)
     if not agenda.events:
         return f"No events were found in `{agenda.calendar_id}` for the next {agenda.window_days} day(s)."
