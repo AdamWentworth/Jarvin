@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   Importance,
   Schedule,
   Visibility,
   cancel,
-  channels,
   createChannel,
   isPermissionGranted,
   requestPermission,
@@ -118,6 +117,11 @@ function notificationTitle(reminder: ReminderItem, kind: "scheduled" | "catchup"
   return kind === "catchup" ? `Reminder due: ${reminder.title}` : `Reminder: ${reminder.title}`;
 }
 
+type NotificationChannel = {
+  id: string;
+  name: string;
+};
+
 export function useReminderNotifications({
   apiBaseUrl,
   isClientOnline,
@@ -158,7 +162,7 @@ export function useReminderNotifications({
       return;
     }
 
-    const existing = await channels();
+    const existing = await invoke<NotificationChannel[]>("plugin:notification|list_channels");
     if (!existing.some((channel) => channel.id === REMINDER_NOTIFICATION_CHANNEL_ID)) {
       await createChannel({
         id: REMINDER_NOTIFICATION_CHANNEL_ID,
