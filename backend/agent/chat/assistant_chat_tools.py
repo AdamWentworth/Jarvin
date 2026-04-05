@@ -6,12 +6,8 @@ from typing import Callable
 import config as cfg
 import backend.agent.host_tool_runtime as host_tool_runtime
 from backend.agent.host_action_approvals import (
-    PendingHostApproval,
-    build_approval_payload,
-    clear_pending_host_approval,
-    get_pending_host_approval,
-    normalize_agent_access_mode,
-    set_pending_host_approval,
+    PendingHostApproval, build_approval_payload, clear_pending_host_approval, get_host_action_trust,
+    get_pending_host_approval, grant_host_action_trust, normalize_agent_access_mode, set_pending_host_approval,
 )
 from backend.agent.briefing.brief_request_tools import handle_brief_command, maybe_handle_brief_request
 from backend.agent.calendar.calendar_request_tools import CalendarPlan, maybe_plan_calendar_request
@@ -37,16 +33,13 @@ from backend.agent.chat.chat_intent_patterns import (
     WEB_SEARCH_RE as _WEB_SEARCH_RE,
 )
 from backend.agent.chat.chat_domain_dispatch import (
-    dispatch_active_follow_up_impl,
-    execute_calendar_plan_impl,
-    execute_research_plan_impl,
-    execute_workspace_plan_impl,
-    maybe_active_follow_up_response_impl,
-    maybe_calendar_tool_response_impl,
-    maybe_research_tool_response_impl,
-    maybe_weather_tool_response_impl,
-    maybe_workspace_tool_response_impl,
-    safe_weather_tool_response_impl,
+    dispatch_active_follow_up_impl, execute_calendar_plan_impl, execute_research_plan_impl, execute_workspace_plan_impl,
+    maybe_active_follow_up_response_impl, maybe_calendar_tool_response_impl, maybe_research_tool_response_impl,
+    maybe_weather_tool_response_impl, maybe_workspace_tool_response_impl, safe_weather_tool_response_impl,
+)
+from backend.agent.chat.chat_domain_adapters import (
+    execute_calendar_plan_adapter, execute_research_plan_adapter, maybe_calendar_tool_response_adapter,
+    maybe_research_tool_response_adapter, maybe_workspace_tool_response_adapter,
 )
 from backend.agent.chat.chat_tool_entrypoints import (
     help_reply as help_reply_impl,
@@ -76,12 +69,10 @@ from backend.agent.chat.chat_tool_helpers import (
     run_reply as _run_reply,
     web_search_reply as _web_search_reply,
 )
-from backend.agent.chat.chat_pending_actions import (
-    execute_pending_host_approval_impl,
-    guard_command_tool_response_impl,
-    guard_write_tool_command_impl,
-    maybe_handle_pending_confirmation_impl,
+from backend.agent.chat.chat_host_action_approval_flow import (
+    execute_pending_host_approval_impl, guard_command_tool_response_impl, guard_write_tool_command_impl,
 )
+from backend.agent.chat.chat_pending_actions import maybe_handle_pending_confirmation_impl
 from backend.agent.integration_facade import (
     begin_google_calendar_auth,
     delete_calendar_event,
@@ -90,11 +81,13 @@ from backend.agent.integration_facade import (
 )
 from backend.agent.chat.chat_followup_context import get_active_follow_up_domain, remember_active_follow_up_domain
 from backend.agent.chat.chat_followup_router import has_conflicting_domain_cues, looks_like_ambiguous_follow_up
+from backend.agent.chat.chat_response_utils import finalize_tool_response_impl, safe_tool_call_impl
 from backend.agent.calendar_pending_actions import clear_pending_calendar_action, get_pending_calendar_action
 from backend.agent.reminders.reminder_request_tools import handle_reminder_command, maybe_handle_reminder_request
 from backend.agent.research.research_request_tools import maybe_plan_research_request, remember_research_context
 from backend.agent.weather.weather_request_tools import maybe_handle_weather_request
 from backend.agent.workspace.workspace_request_tools import maybe_plan_workspace_request, remember_workspace_context
+from memory.agent_action_log import log_agent_action_event
 from memory.conversation import update_latest_tool_turn
 
 tools = host_tool_runtime
@@ -113,19 +106,30 @@ def maybe_handle_assistant_tool_request(
     text: str,
     *,
     conversation_id: int | None = None,
+    client_session_id: str | None = None,
     agent_access_mode: str | None = None,
 ) -> ToolChatResponse:
-    pending = _maybe_handle_pending_confirmation(text, conversation_id=conversation_id)
+    pending = _maybe_handle_pending_confirmation(
+        text,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+    )
     if pending.handled:
         return _finalize_tool_response(pending, conversation_id=conversation_id)
 
-    explicit = maybe_handle_tool_command(text, conversation_id=conversation_id, agent_access_mode=agent_access_mode)
+    explicit = maybe_handle_tool_command(
+        text,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+        agent_access_mode=agent_access_mode,
+    )
     if explicit.handled:
         return _finalize_tool_response(explicit, conversation_id=conversation_id)
 
     natural = maybe_handle_natural_language_tool_request(
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
     )
     return _finalize_tool_response(natural, conversation_id=conversation_id)
@@ -135,11 +139,13 @@ def maybe_handle_tool_command(
     text: str,
     *,
     conversation_id: int | None = None,
+    client_session_id: str | None = None,
     agent_access_mode: str | None = None,
 ) -> ToolChatResponse:
     return maybe_handle_tool_command_impl(
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         ToolChatResponse=ToolChatResponse,
         tools=tools,
@@ -161,11 +167,13 @@ def maybe_handle_natural_language_tool_request(
     text: str,
     *,
     conversation_id: int | None = None,
+    client_session_id: str | None = None,
     agent_access_mode: str | None = None,
 ) -> ToolChatResponse:
     return maybe_handle_natural_language_tool_request_impl(
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         ToolChatResponse=ToolChatResponse,
         calendar_auth_re=_CALENDAR_AUTH_RE,
@@ -213,19 +221,29 @@ def maybe_handle_natural_language_tool_request(
     )
 
 
-def _maybe_handle_pending_confirmation(text: str, *, conversation_id: int | None) -> ToolChatResponse:
+def _maybe_handle_pending_confirmation(
+    text: str,
+    *,
+    conversation_id: int | None,
+    client_session_id: str | None,
+) -> ToolChatResponse:
     return maybe_handle_pending_confirmation_impl(
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         ToolChatResponse=ToolChatResponse,
         get_pending_host_approval=get_pending_host_approval,
         normalize_confirmation_text=_normalize_confirmation_text,
         cancel_patterns=_CANCEL_PATTERNS,
         confirm_patterns=_CONFIRM_PATTERNS,
+        trust_conversation_patterns={"trust this chat", "trust this conversation", "approve for this chat"},
+        trust_session_patterns={"trust this session", "approve for this session", "trust this device"},
         update_latest_tool_turn=update_latest_tool_turn,
         build_approval_payload=build_approval_payload,
         clear_pending_host_approval=clear_pending_host_approval,
+        grant_host_action_trust=grant_host_action_trust,
         execute_pending_host_approval=_execute_pending_host_approval,
+        log_agent_action_event=log_agent_action_event,
         get_pending_calendar_action=get_pending_calendar_action,
         clear_pending_calendar_action=clear_pending_calendar_action,
         delete_calendar_event=delete_calendar_event,
@@ -233,52 +251,61 @@ def _maybe_handle_pending_confirmation(text: str, *, conversation_id: int | None
         update_calendar_event_fields=update_calendar_event_fields,
         calendar_field_update_success_reply=_calendar_field_update_success_reply,
     )
-
-
-def _execute_pending_host_approval(pending: PendingHostApproval, *, conversation_id: int | None) -> ToolChatResponse:
+def _execute_pending_host_approval(
+    pending: PendingHostApproval,
+    *,
+    conversation_id: int | None,
+    client_session_id: str | None,
+) -> ToolChatResponse:
     return execute_pending_host_approval_impl(
         pending,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         ToolChatResponse=ToolChatResponse,
         clean_query=_clean_query,
         run_reply=_run_reply,
         remember_workspace_context=remember_workspace_context,
         tools=tools,
+        log_agent_action_event=log_agent_action_event,
+        access_mode="approve_risky",
     )
-
-
 def _guard_command_tool_response(
     command: str,
     *,
     conversation_id: int | None,
+    client_session_id: str | None,
     agent_access_mode: str | None,
 ) -> ToolChatResponse:
     return guard_command_tool_response_impl(
         command,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         ToolChatResponse=ToolChatResponse,
         clean_query=_clean_query,
         normalize_agent_access_mode=normalize_agent_access_mode,
         run_reply=_run_reply,
         remember_workspace_context=remember_workspace_context,
+        tools=tools,
         PendingHostApproval=PendingHostApproval,
         set_pending_host_approval=set_pending_host_approval,
         build_approval_payload=build_approval_payload,
+        get_host_action_trust=get_host_action_trust,
+        log_agent_action_event=log_agent_action_event,
     )
-
-
 def _guard_write_tool_command(
     rest: str,
     *,
     append: bool,
     conversation_id: int | None,
+    client_session_id: str | None,
     agent_access_mode: str | None,
 ) -> ToolChatResponse:
     return guard_write_tool_command_impl(
         rest,
         append=append,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         ToolChatResponse=ToolChatResponse,
         parse_write_args=_parse_write_args,
@@ -288,57 +315,54 @@ def _guard_write_tool_command(
         PendingHostApproval=PendingHostApproval,
         set_pending_host_approval=set_pending_host_approval,
         build_approval_payload=build_approval_payload,
+        get_host_action_trust=get_host_action_trust,
+        log_agent_action_event=log_agent_action_event,
     )
-
-
 def _help_reply() -> str:
     return help_reply_impl(tools)
-
-
 def _finalize_tool_response(response: ToolChatResponse, *, conversation_id: int | None) -> ToolChatResponse:
-    if response.handled and response.active_domain:
-        remember_active_follow_up_domain(conversation_id, response.active_domain)
-    return response
-
-
+    return finalize_tool_response_impl(
+        response,
+        conversation_id=conversation_id,
+        remember_active_follow_up_domain=remember_active_follow_up_domain,
+    )
 def _safe_tool_call(fn: Callable[[], str], fallback: str, *, active_domain: str | None = None) -> ToolChatResponse:
-    try:
-        return ToolChatResponse(handled=True, reply=fn(), active_domain=active_domain)
-    except Exception as exc:
-        detail = str(exc).strip()
-        if detail:
-            return ToolChatResponse(handled=True, reply=f"{fallback} {detail}", active_domain=active_domain)
-        return ToolChatResponse(handled=True, reply=fallback, active_domain=active_domain)
-
-
+    return safe_tool_call_impl(
+        ToolChatResponse=ToolChatResponse,
+        fn=fn,
+        fallback=fallback,
+        active_domain=active_domain,
+    )
 def _maybe_active_follow_up_response(
     text: str,
     *,
     conversation_id: int | None,
+    client_session_id: str | None,
     agent_access_mode: str | None,
 ) -> ToolChatResponse | None:
     return maybe_active_follow_up_response_impl(
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         get_active_follow_up_domain=get_active_follow_up_domain,
         looks_like_ambiguous_follow_up=looks_like_ambiguous_follow_up,
         has_conflicting_domain_cues=has_conflicting_domain_cues,
         dispatch_active_follow_up=_dispatch_active_follow_up,
     )
-
-
 def _dispatch_active_follow_up(
     active_domain: str,
     text: str,
     *,
     conversation_id: int | None,
+    client_session_id: str | None,
     agent_access_mode: str | None,
 ) -> ToolChatResponse | None:
     return dispatch_active_follow_up_impl(
         active_domain,
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         maybe_weather_tool_response=_maybe_weather_tool_response,
         maybe_handle_brief_request=maybe_handle_brief_request,
@@ -348,8 +372,6 @@ def _dispatch_active_follow_up(
         maybe_research_tool_response=_maybe_research_tool_response,
         ToolChatResponse=ToolChatResponse,
     )
-
-
 def _safe_weather_tool_response(rest: str, *, conversation_id: int | None) -> ToolChatResponse:
     return safe_weather_tool_response_impl(
         rest,
@@ -357,8 +379,6 @@ def _safe_weather_tool_response(rest: str, *, conversation_id: int | None) -> To
         ToolChatResponse=ToolChatResponse,
         maybe_handle_weather_request=maybe_handle_weather_request,
     )
-
-
 def _maybe_weather_tool_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
     return maybe_weather_tool_response_impl(
         text,
@@ -366,49 +386,47 @@ def _maybe_weather_tool_response(text: str, *, conversation_id: int | None) -> T
         ToolChatResponse=ToolChatResponse,
         maybe_handle_weather_request=maybe_handle_weather_request,
     )
-
-
 def _maybe_calendar_tool_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
-    return maybe_calendar_tool_response_impl(
+    return maybe_calendar_tool_response_adapter(
         text,
         conversation_id=conversation_id,
         ToolChatResponse=ToolChatResponse,
         maybe_plan_calendar_request=maybe_plan_calendar_request,
         execute_calendar_plan=_execute_calendar_plan,
+        maybe_calendar_tool_response_impl=maybe_calendar_tool_response_impl,
     )
-
-
 def _maybe_workspace_tool_response(
     text: str,
     *,
     conversation_id: int | None,
+    client_session_id: str | None,
     agent_access_mode: str | None,
 ) -> ToolChatResponse | None:
-    return maybe_workspace_tool_response_impl(
+    return maybe_workspace_tool_response_adapter(
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         ToolChatResponse=ToolChatResponse,
         maybe_plan_workspace_request=maybe_plan_workspace_request,
         execute_workspace_plan=_execute_workspace_plan,
+        maybe_workspace_tool_response_impl=maybe_workspace_tool_response_impl,
     )
-
-
 def _maybe_research_tool_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
-    return maybe_research_tool_response_impl(
+    return maybe_research_tool_response_adapter(
         text,
         conversation_id=conversation_id,
         ToolChatResponse=ToolChatResponse,
         maybe_plan_research_request=maybe_plan_research_request,
         execute_research_plan=_execute_research_plan,
+        maybe_research_tool_response_impl=maybe_research_tool_response_impl,
     )
-
-
 def _execute_calendar_plan(plan: CalendarPlan, *, raw_message: str, conversation_id: int | None) -> str:
-    return execute_calendar_plan_impl(
+    return execute_calendar_plan_adapter(
         plan,
         raw_message=raw_message,
         conversation_id=conversation_id,
+        execute_calendar_plan_impl=execute_calendar_plan_impl,
         begin_google_calendar_auth=begin_google_calendar_auth,
         calendar_lookup_reply=_calendar_lookup_reply,
         extract_calendar_create_text=_extract_calendar_create_text,
@@ -418,12 +436,17 @@ def _execute_calendar_plan(plan: CalendarPlan, *, raw_message: str, conversation
         calendar_update_request_reply=_calendar_update_request_reply,
         calendar_move_request_reply=_calendar_move_request_reply,
     )
-
-
-def _execute_workspace_plan(plan, *, conversation_id: int | None, agent_access_mode: str | None) -> ToolChatResponse:
+def _execute_workspace_plan(
+    plan,
+    *,
+    conversation_id: int | None,
+    client_session_id: str | None,
+    agent_access_mode: str | None,
+) -> ToolChatResponse:
     return execute_workspace_plan_impl(
         plan,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
         ToolChatResponse=ToolChatResponse,
         cfg=cfg,
@@ -434,12 +457,11 @@ def _execute_workspace_plan(plan, *, conversation_id: int | None, agent_access_m
         list_reply=_list_reply,
         guard_command_tool_response=_guard_command_tool_response,
     )
-
-
 def _execute_research_plan(plan, *, conversation_id: int | None) -> str:
-    return execute_research_plan_impl(
+    return execute_research_plan_adapter(
         plan,
         conversation_id=conversation_id,
+        execute_research_plan_impl=execute_research_plan_impl,
         clean_query=_clean_query,
         google_search_reply=_google_search_reply,
         web_search_reply=_web_search_reply,

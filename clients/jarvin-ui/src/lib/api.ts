@@ -1,5 +1,6 @@
 import type {
   AgentAccessMode,
+  AgentActionLogResponse,
   AudioDevicesResponse,
   AudioSelectResponse,
   ChatMode,
@@ -17,6 +18,7 @@ import type {
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 const API_BASE_URL_STORAGE_KEY = "jarvin.apiBaseUrl";
+const CLIENT_SESSION_ID_STORAGE_KEY = "jarvin.clientSessionId";
 
 export class ApiError extends Error {
   status: number;
@@ -59,6 +61,24 @@ function describeNetworkError(error: unknown, fallback: string): Error {
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function getOrCreateClientSessionId(): string {
+  if (!canUseStorage()) {
+    return "browser-session";
+  }
+
+  const existing = window.localStorage.getItem(CLIENT_SESSION_ID_STORAGE_KEY);
+  if (existing) {
+    return existing;
+  }
+
+  const created =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `jarvin-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  window.localStorage.setItem(CLIENT_SESSION_ID_STORAGE_KEY, created);
+  return created;
 }
 
 export function getStoredApiBaseUrl(): string | null {
@@ -263,6 +283,14 @@ export function getDueReminders(minutesAhead = 0, limit = 20) {
   return requestJson<ReminderListResponse>(`/reminders/due?${params.toString()}`);
 }
 
+export function getAgentActionLog(limit = 50, conversationId?: number | null) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (conversationId !== undefined && conversationId !== null) {
+    params.set("conversation_id", String(conversationId));
+  }
+  return requestJson<AgentActionLogResponse>(`/agent/actions?${params.toString()}`);
+}
+
 export function sendChatMessage(params: {
   userText: string;
   conversationId: number | null;
@@ -275,11 +303,23 @@ export function sendChatMessage(params: {
     body: JSON.stringify({
       user_text: params.userText,
       conversation_id: params.conversationId,
+      client_session_id: getOrCreateClientSessionId(),
       mode: params.mode,
       use_history: true,
       use_profile: true,
       speak_reply: params.speakReply,
       agent_access_mode: params.agentAccessMode,
+    }),
+  });
+}
+
+export function respondToApproval(params: { decision: string; conversationId: number | null }) {
+  return requestJson<ChatResponse>("/agent/approvals/respond", {
+    method: "POST",
+    body: JSON.stringify({
+      decision: params.decision,
+      conversation_id: params.conversationId,
+      client_session_id: getOrCreateClientSessionId(),
     }),
   });
 }

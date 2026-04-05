@@ -5,6 +5,7 @@ def maybe_handle_tool_command_impl(
     text: str,
     *,
     conversation_id,
+    client_session_id,
     agent_access_mode,
     ToolChatResponse,
     tools,
@@ -43,10 +44,16 @@ def maybe_handle_tool_command_impl(
             rest,
             append=verb == "append",
             conversation_id=conversation_id,
+            client_session_id=client_session_id,
             agent_access_mode=agent_access_mode,
         )
     if verb == "run":
-        return guard_command_tool_response(rest, conversation_id=conversation_id, agent_access_mode=agent_access_mode)
+        return guard_command_tool_response(
+            rest,
+            conversation_id=conversation_id,
+            client_session_id=client_session_id,
+            agent_access_mode=agent_access_mode,
+        )
     if verb == "web":
         return _safe_tool_call(ToolChatResponse, lambda: web_search_reply(rest), "I couldn't search the web just now.", active_domain="research")
     if verb == "google":
@@ -75,6 +82,7 @@ def maybe_handle_natural_language_tool_request_impl(
     text: str,
     *,
     conversation_id,
+    client_session_id,
     agent_access_mode,
     ToolChatResponse,
     calendar_auth_re,
@@ -134,6 +142,7 @@ def maybe_handle_natural_language_tool_request_impl(
     active_follow_up = maybe_active_follow_up_response(
         message,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
     )
     if active_follow_up is not None:
@@ -158,6 +167,7 @@ def maybe_handle_natural_language_tool_request_impl(
     workspace_reply = maybe_workspace_tool_response(
         message,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
     )
     if workspace_reply is not None:
@@ -284,6 +294,7 @@ def maybe_handle_natural_language_tool_request_impl(
         return guard_command_tool_response(
             run_match.group("command"),
             conversation_id=conversation_id,
+            client_session_id=client_session_id,
             agent_access_mode=agent_access_mode,
         )
 

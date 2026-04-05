@@ -6,6 +6,7 @@ import "./App.layout.css";
 import {
   activateConversation,
   createConversation,
+  respondToApproval,
   saveProfile,
   sendChatMessage,
 } from "./lib/api";
@@ -154,6 +155,7 @@ function App() {
       if (notificationsEnabled) {
         void syncReminderNotifications();
       }
+      void host.refreshAgentActionLog();
       setChatStatus("");
     } catch (error) {
       setRemoteVoiceStage("chat", "error");
@@ -261,6 +263,28 @@ function App() {
     setStoredAgentAccessMode(value);
   }
 
+  async function handleRespondToApproval(decision: string) {
+    const conversationId = workspace.activeConversationId;
+    if (conversationId === null || sending) {
+      return;
+    }
+
+    setSending(true);
+    setChatStatus("Processing host action approval...");
+    try {
+      const response = await respondToApproval({ decision, conversationId });
+      const nextConversationId = response.conversation_id ?? conversationId;
+      const activatedWorkspace = await activateConversation(nextConversationId);
+      workspace.syncWorkspace(activatedWorkspace);
+      void host.refreshAgentActionLog(nextConversationId);
+      setChatStatus("");
+    } catch (error) {
+      setChatStatus(describeError(error));
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function handleSaveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setProfileStatus("Saving profile...");
@@ -337,6 +361,8 @@ function App() {
       activeConversationTitle={historyTitle(workspace.conversations, workspace.activeConversationId)}
       activeInspectorSection={activeInspectorSection}
       agentAccessMode={agentAccessMode}
+      agentActionLog={host.agentActionLog}
+      agentActionLogStatus={host.agentActionLogStatus}
       apiBaseUrl={host.apiBaseUrl}
       apiBaseUrlDraft={host.apiBaseUrlDraft}
       apiBaseUrlStatus={host.apiBaseUrlStatus}
@@ -397,7 +423,7 @@ function App() {
       onAgentAccessModeChange={handleAgentAccessModeChange}
       onApiBaseUrlDraftChange={host.setApiBaseUrlDraft}
       onApplyLlmSettings={() => void host.handleApplyLlmSettings()}
-      onApprovePendingAction={() => void handleSendMessage("approve")}
+      onApprovePendingAction={() => void handleRespondToApproval("approve")}
       onCancelRenameConversation={workspace.handleCancelRenameConversation}
       onChatInputChange={setChatInput}
       onClearApiBaseUrl={() => void host.handleClearApiBaseUrlOverride()}
@@ -407,7 +433,7 @@ function App() {
       onComposerKeyDown={handleComposerKeyDown}
       onCreateConversation={() => void workspace.handleCreateConversation()}
       onDeleteConversation={(conversationId) => void workspace.handleDeleteConversation(conversationId)}
-      onDenyPendingAction={() => void handleSendMessage("deny")}
+      onDenyPendingAction={() => void handleRespondToApproval("deny")}
       onEditingConversationTitleChange={workspace.setEditingConversationTitle}
       onListenerAction={(action) => void host.handleListenerAction(action)}
       onOpenConversationSidebar={() => setIsMobileSidebarOpen(true)}
@@ -419,6 +445,7 @@ function App() {
       onProfileChange={setProfile}
       onReconnectHost={() => void host.handleReconnectHost()}
       onRefreshLlmSettings={() => void host.handleRefreshLlmSettings()}
+      onRefreshAgentActionLog={() => void host.refreshAgentActionLog()}
       onRefreshWorkspace={() => void host.refreshWorkspace({ withLoading: false, reason: "manual" })}
       onRemoteVoicePressCancel={handleRemoteVoicePressCancel}
       onRemoteVoicePressEnd={handleRemoteVoicePressEnd}
@@ -437,6 +464,8 @@ function App() {
       onSetNotificationsEnabled={(value) => void setNotificationsEnabled(value)}
       onStartRenameConversation={workspace.handleStartRenameConversation}
       onSyncNotifications={() => void syncReminderNotifications()}
+      onTrustPendingAction={() => void handleRespondToApproval("trust this chat")}
+      onTrustPendingSession={() => void handleRespondToApproval("trust this session")}
       onToggleConversationMenu={workspace.handleToggleConversationMenu}
       onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
       onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}

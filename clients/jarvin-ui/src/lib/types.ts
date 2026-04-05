@@ -38,6 +38,11 @@ export interface ApprovalRequestToolPayload {
   details: string[];
   access_mode: AgentAccessMode | string;
   can_approve: boolean;
+  can_trust_conversation?: boolean;
+  can_trust_session?: boolean;
+  trust_active?: boolean;
+  trust_scope?: string | null;
+  preview_block?: string | null;
 }
 
 export interface ConversationSummary {
@@ -97,6 +102,31 @@ export interface ReminderItem {
 
 export interface ReminderListResponse {
   reminders: ReminderItem[];
+}
+
+export interface AgentActionLogItem {
+  id: number;
+  created_at: string;
+  conversation_id?: number | null;
+  event_kind: string;
+  action_kind: string;
+  risk_level: string;
+  access_mode: string;
+  title: string;
+  summary: string;
+  command?: string | null;
+  path?: string | null;
+  content_preview?: string | null;
+  detail?: string | null;
+  client_session_id?: string | null;
+  trust_scope?: string | null;
+  working_directory?: string | null;
+  argv?: string[] | null;
+  diff_preview?: string | null;
+}
+
+export interface AgentActionLogResponse {
+  actions: AgentActionLogItem[];
 }
 
 export interface HealthResponse {

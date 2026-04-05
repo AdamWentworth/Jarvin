@@ -5,6 +5,7 @@ def maybe_active_follow_up_response_impl(
     text: str,
     *,
     conversation_id,
+    client_session_id,
     agent_access_mode,
     get_active_follow_up_domain,
     looks_like_ambiguous_follow_up,
@@ -22,6 +23,7 @@ def maybe_active_follow_up_response_impl(
         active_domain,
         text,
         conversation_id=conversation_id,
+        client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
     )
 
@@ -31,6 +33,7 @@ def dispatch_active_follow_up_impl(
     text: str,
     *,
     conversation_id,
+    client_session_id,
     agent_access_mode,
     maybe_weather_tool_response,
     maybe_handle_brief_request,
@@ -58,6 +61,7 @@ def dispatch_active_follow_up_impl(
         return maybe_workspace_tool_response(
             text,
             conversation_id=conversation_id,
+            client_session_id=client_session_id,
             agent_access_mode=agent_access_mode,
         )
     if active_domain == "research":
@@ -148,6 +152,7 @@ def maybe_workspace_tool_response_impl(
     text: str,
     *,
     conversation_id,
+    client_session_id,
     agent_access_mode,
     ToolChatResponse,
     maybe_plan_workspace_request,
@@ -160,6 +165,7 @@ def maybe_workspace_tool_response_impl(
         return execute_workspace_plan(
             plan,
             conversation_id=conversation_id,
+            client_session_id=client_session_id,
             agent_access_mode=agent_access_mode,
         )
     except Exception as exc:
@@ -250,6 +256,7 @@ def execute_workspace_plan_impl(
     plan,
     *,
     conversation_id,
+    client_session_id,
     agent_access_mode,
     ToolChatResponse,
     cfg,
@@ -300,6 +307,7 @@ def execute_workspace_plan_impl(
         return guard_command_tool_response(
             command,
             conversation_id=conversation_id,
+            client_session_id=client_session_id,
             agent_access_mode=agent_access_mode,
         )
 

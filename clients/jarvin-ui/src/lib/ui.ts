@@ -38,8 +38,8 @@ export const AGENT_ACCESS_OPTIONS: Array<{ value: AgentAccessMode; label: string
   },
   {
     value: "full_access",
-    label: "Trusted full access",
-    hint: "Jarvin can immediately run allowed host commands and workspace writes from this client.",
+    label: "Trusted host tool access",
+    hint: "Jarvin can immediately run the currently allowed host commands and workspace writes from this client.",
   },
 ];
 

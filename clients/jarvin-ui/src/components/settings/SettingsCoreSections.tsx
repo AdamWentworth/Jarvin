@@ -118,7 +118,7 @@ export function SettingsGeneralSection({
       <section className="nested-panel">
         <div className="section-copy">
           <h3>Agent access</h3>
-          <p>Choose how much host power this client can grant Jarvin before it asks for approval.</p>
+          <p>Choose how much host power this client can grant Jarvin before it asks for approval, trust, or execution.</p>
         </div>
 
         <label className="field-stack">

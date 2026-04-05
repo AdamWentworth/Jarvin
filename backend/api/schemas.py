@@ -34,6 +34,7 @@ class SimpleMessage(_StrictModel):
 class ChatRequest(_StrictModel):
     user_text: str
     conversation_id: int | None = None
+    client_session_id: str | None = None
     agent_access_mode: str | None = None
     mode: str | None = None
     context: str | None = None
@@ -45,6 +46,12 @@ class ChatRequest(_StrictModel):
     history_window: int | None = None
     use_profile: bool = True
     speak_reply: bool = False
+
+
+class ApprovalDecisionRequest(_StrictModel):
+    decision: str
+    conversation_id: int | None = None
+    client_session_id: str | None = None
 
 
 class ChatResponse(_StrictModel):
@@ -207,3 +214,28 @@ class AgentCommandResponse(_StrictModel):
     stdout: str = ""
     stderr: str = ""
     timed_out: bool = False
+
+
+class AgentActionLogEntry(_StrictModel):
+    id: int
+    created_at: str
+    conversation_id: int | None = None
+    event_kind: str
+    action_kind: str
+    risk_level: str
+    access_mode: str
+    title: str
+    summary: str
+    command: str | None = None
+    path: str | None = None
+    content_preview: str | None = None
+    detail: str | None = None
+    client_session_id: str | None = None
+    trust_scope: str | None = None
+    working_directory: str | None = None
+    argv: list[str] | None = None
+    diff_preview: str | None = None
+
+
+class AgentActionLogResponse(_StrictModel):
+    actions: list[AgentActionLogEntry]

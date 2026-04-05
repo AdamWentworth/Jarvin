@@ -2,7 +2,7 @@
 
 import backend.agent.chat.chat_tool_helpers as chat_tool_helpers
 import backend.agent.chat.assistant_chat_tools as chat_tools
-from backend.agent.host_action_approvals import clear_pending_host_approval
+from backend.agent.host_action_approvals import clear_host_action_trust, clear_pending_host_approval
 from backend.agent.integration_facade import (
     CalendarAgendaResult,
     CalendarEventDetails,
@@ -315,6 +315,88 @@ def test_pending_host_command_can_be_denied(monkeypatch):
     assert pending.tool_kind == "approval_request"
     assert denied.handled is True
     assert "canceled that pending host action" in denied.reply.lower()
+
+
+def test_pending_host_command_can_trust_conversation(monkeypatch):
+    conversation_id = 44
+    seen_commands: list[str] = []
+    monkeypatch.setattr(
+        chat_tools,
+        "_run_reply",
+        lambda command: seen_commands.append(command) or f"Command `{command}` exited with `0`.",
+        raising=True,
+    )
+    monkeypatch.setattr(chat_tools, "update_latest_tool_turn", lambda **kwargs: True, raising=True)
+
+    try:
+        pending = chat_tools.maybe_handle_assistant_tool_request(
+            "run git status",
+            conversation_id=conversation_id,
+            agent_access_mode="approve_risky",
+        )
+        trusted = chat_tools.maybe_handle_assistant_tool_request("trust this chat", conversation_id=conversation_id)
+        follow_up = chat_tools.maybe_handle_assistant_tool_request(
+            "run git diff --stat",
+            conversation_id=conversation_id,
+            agent_access_mode="approve_risky",
+        )
+    finally:
+        clear_pending_host_approval(conversation_id)
+        clear_host_action_trust(conversation_id)
+
+    assert pending.handled is True
+    assert pending.tool_kind == "approval_request"
+    assert trusted.handled is True
+    assert "git status" in trusted.reply
+    assert follow_up.handled is True
+    assert follow_up.tool_kind is None
+    assert "git diff --stat" in follow_up.reply
+    assert seen_commands == ["git status", "git diff --stat"]
+
+
+def test_pending_host_command_can_trust_session_across_conversations(monkeypatch):
+    session_id = "session-abc"
+    seen_commands: list[str] = []
+    monkeypatch.setattr(
+        chat_tools,
+        "_run_reply",
+        lambda command: seen_commands.append(command) or f"Command `{command}` exited with `0`.",
+        raising=True,
+    )
+    monkeypatch.setattr(chat_tools, "update_latest_tool_turn", lambda **kwargs: True, raising=True)
+
+    try:
+        pending = chat_tools.maybe_handle_assistant_tool_request(
+            "run git status",
+            conversation_id=45,
+            client_session_id=session_id,
+            agent_access_mode="approve_risky",
+        )
+        trusted = chat_tools.maybe_handle_assistant_tool_request(
+            "trust this session",
+            conversation_id=45,
+            client_session_id=session_id,
+        )
+        follow_up = chat_tools.maybe_handle_assistant_tool_request(
+            "run git diff --stat",
+            conversation_id=46,
+            client_session_id=session_id,
+            agent_access_mode="approve_risky",
+        )
+    finally:
+        clear_pending_host_approval(45)
+        clear_pending_host_approval(46)
+        clear_host_action_trust(45, session_id, scope="session")
+
+    assert pending.handled is True
+    assert pending.tool_kind == "approval_request"
+    assert pending.tool_payload["can_trust_session"] is True
+    assert trusted.handled is True
+    assert "git status" in trusted.reply
+    assert follow_up.handled is True
+    assert follow_up.tool_kind is None
+    assert "git diff --stat" in follow_up.reply
+    assert seen_commands == ["git status", "git diff --stat"]
 
 
 def test_natural_language_reminder_request_is_handled(monkeypatch):

@@ -3,6 +3,7 @@ import { ConversationSidebar } from "./ConversationSidebar";
 import { ChatWorkspace } from "./ChatWorkspace";
 import { SettingsOverlay } from "./SettingsOverlay";
 import type {
+  AgentActionLogItem,
   AgentAccessMode,
   AudioDevicesResponse,
   ConversationSummary,
@@ -21,6 +22,8 @@ type AppWorkspaceShellProps = {
   activeConversationTitle: string;
   activeInspectorSection: InspectorSection;
   agentAccessMode: AgentAccessMode;
+  agentActionLog: AgentActionLogItem[];
+  agentActionLogStatus: string;
   apiBaseUrl: string;
   apiBaseUrlDraft: string;
   apiBaseUrlStatus: string;
@@ -83,6 +86,8 @@ type AppWorkspaceShellProps = {
   onApiBaseUrlDraftChange: (value: string) => void;
   onApplyLlmSettings: () => void;
   onCancelRenameConversation: () => void;
+  onTrustPendingAction: () => void;
+  onTrustPendingSession: () => void;
   onChatInputChange: (value: string) => void;
   onClearApiBaseUrl: () => void;
   onClearConversation: (conversationId: number) => void;
@@ -97,6 +102,7 @@ type AppWorkspaceShellProps = {
   onOpenSettings: () => void;
   onPlayLatestReplyAudio: () => void;
   onReconnectHost: () => void;
+  onRefreshAgentActionLog: () => void;
   onRefreshLlmSettings: () => void;
   onRefreshWorkspace: () => void;
   onRemoteVoicePressCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -129,6 +135,8 @@ export function AppWorkspaceShell({
   activeConversationTitle,
   activeInspectorSection,
   agentAccessMode,
+  agentActionLog,
+  agentActionLogStatus,
   apiBaseUrl,
   apiBaseUrlDraft,
   apiBaseUrlStatus,
@@ -191,6 +199,8 @@ export function AppWorkspaceShell({
   onApplyLlmSettings,
   onApprovePendingAction,
   onCancelRenameConversation,
+  onTrustPendingAction,
+  onTrustPendingSession,
   onChatInputChange,
   onClearApiBaseUrl,
   onClearConversation,
@@ -207,6 +217,7 @@ export function AppWorkspaceShell({
   onPlayLatestReplyAudio,
   onProfileChange,
   onReconnectHost,
+  onRefreshAgentActionLog,
   onRefreshLlmSettings,
   onRefreshWorkspace,
   onRemoteVoicePressCancel,
@@ -293,6 +304,8 @@ export function AppWorkspaceShell({
           onSendMessage={() => onSendMessage()}
           onApprovePendingAction={onApprovePendingAction}
           onDenyPendingAction={onDenyPendingAction}
+          onTrustPendingAction={onTrustPendingAction}
+          onTrustPendingSession={onTrustPendingSession}
           remoteVoiceAvailable={remoteVoiceAvailable}
           remoteVoiceBusy={isRemoteTranscribing}
           remoteVoiceDisabledReason={remoteVoiceDisabledReason}
@@ -326,11 +339,14 @@ export function AppWorkspaceShell({
         currentModel={llmOptions?.current_model ?? "Unknown"}
         currentBackend={llmOptions?.current_backend ?? "Unknown"}
         agentAccessMode={agentAccessMode}
+        agentActionLog={agentActionLog}
+        agentActionLogStatus={agentActionLogStatus}
         onAgentAccessModeChange={onAgentAccessModeChange}
         activeInspectorSection={activeInspectorSection}
         onSectionChange={onSectionChange}
         onRefreshWorkspace={onRefreshWorkspace}
         onReconnectHost={onReconnectHost}
+        onRefreshAgentActionLog={onRefreshAgentActionLog}
         llmOptions={llmOptions}
         selectedBackend={selectedBackend}
         selectedModel={selectedModel}

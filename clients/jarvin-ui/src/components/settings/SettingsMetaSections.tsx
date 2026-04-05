@@ -14,6 +14,8 @@ type ProfileSectionProps = Pick<
 
 type DiagnosticsSectionProps = Pick<
   SettingsOverlayProps,
+  | "agentActionLog"
+  | "agentActionLogStatus"
   | "connectionState"
   | "connectionSummary"
   | "currentListenerStatus"
@@ -23,6 +25,7 @@ type DiagnosticsSectionProps = Pick<
   | "lastRoundTripMs"
   | "lastSuccessfulContactLabel"
   | "live"
+  | "onRefreshAgentActionLog"
   | "remoteVoiceDiagnostics"
 >;
 
@@ -117,6 +120,8 @@ export function SettingsProfileSection({
 }
 
 export function SettingsDiagnosticsSection({
+  agentActionLog,
+  agentActionLogStatus,
   connectionState,
   connectionSummary,
   currentListenerStatus,
@@ -126,6 +131,7 @@ export function SettingsDiagnosticsSection({
   lastRoundTripMs,
   lastSuccessfulContactLabel,
   live,
+  onRefreshAgentActionLog,
   remoteVoiceDiagnostics,
 }: DiagnosticsSectionProps) {
   return (
@@ -214,6 +220,52 @@ export function SettingsDiagnosticsSection({
             <strong>{remoteVoiceDiagnostics.note || lastConnectionError || "No recent remote voice events."}</strong>
           </div>
         </div>
+      </section>
+
+      <section className="nested-panel">
+        <div className="section-copy">
+          <h3>Host action log</h3>
+          <p>Recent risky host actions, approvals, trust grants, and execution results.</p>
+        </div>
+
+        <div className="button-row">
+          <button type="button" className="ghost-button" onClick={onRefreshAgentActionLog}>
+            Refresh action log
+          </button>
+        </div>
+
+        {agentActionLogStatus ? <p className="section-status">{agentActionLogStatus}</p> : null}
+
+        {agentActionLog.length ? (
+          <div className="diagnostic-log-list">
+            {agentActionLog.map((item) => (
+              <article key={item.id} className="diagnostic-log-card">
+                <div className="diagnostic-log-header">
+                  <strong>{item.title}</strong>
+                  <span>{new Date(item.created_at).toLocaleString()}</span>
+                </div>
+                <p className="diagnostic-log-summary">{item.summary}</p>
+                <p className="diagnostic-log-meta">
+                  {item.event_kind} | {item.action_kind} | {item.risk_level} | {item.access_mode}
+                </p>
+                {item.trust_scope ? <p className="diagnostic-log-meta">Trust scope: {item.trust_scope}</p> : null}
+                {item.working_directory ? <p className="diagnostic-log-meta">CWD: {item.working_directory}</p> : null}
+                {item.argv?.length ? <p className="diagnostic-log-meta">Args: {item.argv.join(" | ")}</p> : null}
+                {item.command ? <p className="diagnostic-log-meta">Command: {item.command}</p> : null}
+                {item.path ? <p className="diagnostic-log-meta">Path: {item.path}</p> : null}
+                {item.content_preview ? <p className="diagnostic-log-meta">Preview: {item.content_preview}</p> : null}
+                {item.diff_preview ? (
+                  <pre className="approval-request-preview diagnostic-log-preview">
+                    <code>{item.diff_preview}</code>
+                  </pre>
+                ) : null}
+                {item.detail ? <p className="diagnostic-log-meta">{item.detail}</p> : null}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="section-status">No risky host actions have been recorded yet.</p>
+        )}
       </section>
     </section>
   );

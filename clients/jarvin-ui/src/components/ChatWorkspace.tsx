@@ -45,6 +45,8 @@ type ChatWorkspaceProps = {
   onSendMessage: () => void;
   onApprovePendingAction: () => void;
   onDenyPendingAction: () => void;
+  onTrustPendingAction: () => void;
+  onTrustPendingSession: () => void;
   onToggleRemoteVoice: () => void;
   onRemoteVoicePressStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onRemoteVoicePressEnd: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -95,6 +97,8 @@ export function ChatWorkspace({
   onSendMessage,
   onApprovePendingAction,
   onDenyPendingAction,
+  onTrustPendingAction,
+  onTrustPendingSession,
   onToggleRemoteVoice,
   onRemoteVoicePressStart,
   onRemoteVoicePressEnd,
@@ -196,6 +200,8 @@ export function ChatWorkspace({
                         sending={sending}
                         onApprove={onApprovePendingAction}
                         onDeny={onDenyPendingAction}
+                        onTrustConversation={onTrustPendingAction}
+                        onTrustSession={onTrustPendingSession}
                       />
                     ) : null}
                   </div>

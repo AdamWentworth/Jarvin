@@ -23,6 +23,8 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
     currentListenerStatus,
     currentModel,
     isOpen,
+    agentActionLog,
+    agentActionLogStatus,
     notificationPermission,
     notificationsEnabled,
     notificationsSupported,
@@ -31,6 +33,7 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
     onApplyLlmSettings,
     onClearApiBaseUrl,
     onClose,
+    onRefreshAgentActionLog,
     onReconnectHost,
     onRefreshLlmSettings,
     onRefreshWorkspace,
@@ -52,7 +55,7 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
       {
         read_only: "Read only",
         approve_risky: "Approve risky actions",
-        full_access: "Trusted full access",
+        full_access: "Trusted host tool access",
       } as const
     )[agentAccessMode] ?? "Approve risky actions";
   const notificationSummary = !notificationsSupported
@@ -221,6 +224,8 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
 
           {activeInspectorSection === "diagnostics" ? (
             <SettingsDiagnosticsSection
+              agentActionLog={agentActionLog}
+              agentActionLogStatus={agentActionLogStatus}
               connectionState={props.connectionState}
               connectionSummary={props.connectionSummary}
               currentListenerStatus={props.currentListenerStatus}
@@ -230,6 +235,7 @@ export function SettingsOverlay(props: SettingsOverlayProps) {
               lastRoundTripMs={props.lastRoundTripMs}
               lastSuccessfulContactLabel={props.lastSuccessfulContactLabel}
               live={props.live}
+              onRefreshAgentActionLog={onRefreshAgentActionLog}
               remoteVoiceDiagnostics={props.remoteVoiceDiagnostics}
             />
           ) : null}

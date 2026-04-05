@@ -33,6 +33,7 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         tool_response = maybe_handle_assistant_tool_request(
             text,
             conversation_id=payload.conversation_id,
+            client_session_id=payload.client_session_id,
             agent_access_mode=payload.agent_access_mode,
         )
     except Exception as exc:

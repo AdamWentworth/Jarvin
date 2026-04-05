@@ -58,6 +58,11 @@
   background: linear-gradient(180deg, rgba(66, 186, 150, 0.08) 0%, rgba(24, 27, 32, 0.96) 100%);
 }
 
+.approval-request-card.status-trusted {
+  border-color: rgba(92, 170, 255, 0.28);
+  background: linear-gradient(180deg, rgba(92, 170, 255, 0.08) 0%, rgba(24, 27, 32, 0.96) 100%);
+}
+
 .approval-request-header,
 .approval-request-footer {
   display: flex;
@@ -122,6 +127,11 @@
   color: #c9f6e6;
 }
 
+.approval-badge.status-trusted {
+  border-color: rgba(92, 170, 255, 0.3);
+  color: #d9ebff;
+}
+
 .approval-badge.status-denied {
   border-color: rgba(217, 83, 79, 0.3);
   color: #ffd6d0;
@@ -133,6 +143,24 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.approval-request-preview {
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(10, 12, 15, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  color: #dfe7f2;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.approval-request-preview code {
+  font-family: "Cascadia Code", "Consolas", monospace;
 }
 
 .approval-request-meta {

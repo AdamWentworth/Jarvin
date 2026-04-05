@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+from difflib import unified_diff
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -245,22 +246,12 @@ def run_safe_command(command: str) -> CommandResult:
     if not cfg.settings.agent_allow_command_execution:
         raise PermissionError("Command execution is disabled on this Jarvin host.")
 
-    raw = str(command or "").strip()
-    if not raw:
-        raise ValueError("Command cannot be empty.")
-    if any(token in raw for token in ["&&", "||", "|", ">", "<", ";"]):
-        raise ValueError("Shell operators are not allowed in agent commands.")
-
-    argv = shlex.split(raw, posix=False)
-    if not argv:
-        raise ValueError("Command cannot be empty.")
-
-    _validate_command(argv)
+    raw, argv, cwd = prepare_safe_command(command)
 
     try:
         proc = subprocess.run(
             argv,
-            cwd=workspace_root(),
+            cwd=cwd,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -283,6 +274,57 @@ def run_safe_command(command: str) -> CommandResult:
             stderr=_trim_output((exc.stderr or "") if isinstance(exc.stderr, str) else "Command timed out."),
             timed_out=True,
         )
+
+
+def prepare_safe_command(command: str) -> tuple[str, list[str], Path]:
+    ensure_tools_enabled()
+    raw = str(command or "").strip()
+    if not raw:
+        raise ValueError("Command cannot be empty.")
+    if any(token in raw for token in ["&&", "||", "|", ">", "<", ";"]):
+        raise ValueError("Shell operators are not allowed in agent commands.")
+
+    argv = shlex.split(raw, posix=False)
+    if not argv:
+        raise ValueError("Command cannot be empty.")
+
+    _validate_command(argv)
+    return raw, argv, workspace_root()
+
+
+def describe_safe_command(command: str) -> dict[str, object]:
+    raw, argv, cwd = prepare_safe_command(command)
+    return {
+        "command": raw,
+        "argv": argv,
+        "working_directory": str(cwd),
+    }
+
+
+def build_write_diff_preview(path: str, content: str, *, append: bool = False, max_chars: int = 600) -> str | None:
+    target = resolve_workspace_path(path)
+    existing_text = ""
+    if target.exists() and target.is_file():
+        existing_text = target.read_text(encoding="utf-8", errors="replace")
+
+    next_text = f"{existing_text}{content}" if append else content
+    rel = _normalize_path(target)
+    diff_lines = list(
+        unified_diff(
+            existing_text.splitlines(),
+            next_text.splitlines(),
+            fromfile=f"a/{rel}",
+            tofile=f"b/{rel}",
+            lineterm="",
+        )
+    )
+    if not diff_lines:
+        return None
+
+    preview = "\n".join(diff_lines).strip()
+    if len(preview) > max_chars:
+        preview = preview[: max_chars - 3].rstrip() + "..."
+    return preview or None
 
 
 def _validate_command(argv: list[str]) -> None:

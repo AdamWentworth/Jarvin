@@ -3,6 +3,7 @@ import {
   activateConversation,
   applyLlmSelection,
   clearStoredApiBaseUrl,
+  getAgentActionLog,
   getApiBaseUrl,
   getAudioDevices,
   getHealth,
@@ -18,6 +19,7 @@ import {
   getWorkspaceBootstrap,
 } from "../lib/api";
 import type {
+  AgentActionLogItem,
   AudioDevicesResponse,
   HealthResponse,
   LLMOptionsResponse,
@@ -68,6 +70,8 @@ export function useJarvinHost({
   const [apiBaseUrlStatus, setApiBaseUrlStatus] = useState("");
   const [llmStatus, setLlmStatus] = useState("");
   const [deviceStatus, setDeviceStatus] = useState("");
+  const [agentActionLog, setAgentActionLog] = useState<AgentActionLogItem[]>([]);
+  const [agentActionLogStatus, setAgentActionLogStatus] = useState("");
   const lastLiveSeq = useRef<number | null>(null);
   const consecutivePollFailuresRef = useRef(0);
 
@@ -89,12 +93,12 @@ export function useJarvinHost({
     const base = connectionLabel(connectionState);
     if (connectionState === "connected") {
       if (lastRoundTripMs !== null) {
-        return `${base} • ${lastRoundTripMs} ms`;
+        return `${base} | ${lastRoundTripMs} ms`;
       }
       return base;
     }
     if (lastConnectionError) {
-      return `${base} • ${lastConnectionError}`;
+      return `${base} | ${lastConnectionError}`;
     }
     return base;
   }, [connectionState, isClientOnline, lastConnectionError, lastRoundTripMs]);
@@ -146,6 +150,9 @@ export function useJarvinHost({
       setLastSuccessfulContactAt(new Date().toISOString());
       setLastRoundTripMs(Math.max(1, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)));
       consecutivePollFailuresRef.current = 0;
+      void refreshAgentActionLog().catch(() => {
+        // Keep the main workspace bootstrap healthy even if diagnostics cannot load.
+      });
     } catch (error) {
       const message = describeErrorRef.current(error);
       setConnectionError(message);
@@ -155,6 +162,17 @@ export function useJarvinHost({
       if (withLoading) {
         setLoading(false);
       }
+    }
+  }
+
+  async function refreshAgentActionLog(conversationId?: number | null) {
+    try {
+      const next = await getAgentActionLog(40, conversationId);
+      setAgentActionLog(next.actions);
+      setAgentActionLogStatus("");
+    } catch (error) {
+      setAgentActionLog([]);
+      setAgentActionLogStatus(describeErrorRef.current(error));
     }
   }
 
@@ -312,6 +330,8 @@ export function useJarvinHost({
     apiBaseUrl,
     apiBaseUrlDraft,
     apiBaseUrlStatus,
+    agentActionLog,
+    agentActionLogStatus,
     audioDevices,
     connectionError,
     connectionState,
@@ -337,6 +357,7 @@ export function useJarvinHost({
     live,
     loading,
     modelChoices,
+    refreshAgentActionLog,
     refreshWorkspace,
     selectedBackend,
     selectedDeviceIndex,

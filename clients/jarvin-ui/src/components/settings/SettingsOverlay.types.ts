@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import type { AgentAccessMode, AudioDevicesResponse, HealthResponse, LLMOptionsResponse, LiveSnapshot, UserProfilePayload } from "../../lib/types";
+import type { AgentAccessMode, AgentActionLogItem, AudioDevicesResponse, HealthResponse, LLMOptionsResponse, LiveSnapshot, UserProfilePayload } from "../../lib/types";
 import type { ReminderNotificationPermission } from "../../lib/notifications";
 import type { ConnectionState, RemoteVoiceDiagnostics } from "../../lib/runtime";
 import type { InspectorSection } from "../../lib/ui";
@@ -22,6 +22,7 @@ export type SettingsOverlayProps = {
   onSectionChange: (section: InspectorSection) => void;
   onRefreshWorkspace: () => void;
   onReconnectHost: () => void;
+  onRefreshAgentActionLog: () => void;
   llmOptions: LLMOptionsResponse | null;
   selectedBackend: string;
   selectedModel: string;
@@ -52,6 +53,8 @@ export type SettingsOverlayProps = {
   onPlayLatestReplyAudio: () => void;
   connectionState: ConnectionState;
   connectionSummary: string;
+  agentActionLog: AgentActionLogItem[];
+  agentActionLogStatus: string;
   lastConnectionError: string;
   lastSuccessfulContactLabel: string;
   lastRoundTripMs: number | null;
