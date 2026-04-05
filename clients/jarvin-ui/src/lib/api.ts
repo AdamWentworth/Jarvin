@@ -7,6 +7,7 @@ import type {
   HealthResponse,
   LLMOptionsResponse,
   LiveSnapshot,
+  ReminderListResponse,
   StatusResponse,
   TranscribeResponse,
   UserProfilePayload,
@@ -242,6 +243,23 @@ export function deleteConversation(conversationId: number) {
   return requestJson<ConversationWorkspaceResponse>(`/conversations/${conversationId}`, {
     method: "DELETE",
   });
+}
+
+export function getReminders(status = "pending", limit = 100) {
+  const params = new URLSearchParams();
+  if (status) {
+    params.set("status", status);
+  }
+  params.set("limit", String(limit));
+  return requestJson<ReminderListResponse>(`/reminders?${params.toString()}`);
+}
+
+export function getDueReminders(minutesAhead = 0, limit = 20) {
+  const params = new URLSearchParams({
+    minutes_ahead: String(minutesAhead),
+    limit: String(limit),
+  });
+  return requestJson<ReminderListResponse>(`/reminders/due?${params.toString()}`);
 }
 
 export function sendChatMessage(params: {

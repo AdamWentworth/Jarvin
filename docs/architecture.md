@@ -2,90 +2,226 @@
 
 ## Purpose
 
-Jarvin is a local-first voice assistant for Windows. Its main runtime path is:
+Jarvin is a private, host-run personal assistant.
+
+The host machine owns:
+
+- model runtimes
+- GPU inference
+- SQLite persistence
+- tool execution
+- calendar and reminder state
+- voice processing
+
+Other devices act as clients over local network or WireGuard.
+
+## System Shape
+
+### Host
+
+The host is a FastAPI service started from `python server.py`.
+
+It is responsible for:
+
+- app startup and background listener lifecycle
+- ASR, LLM, and TTS orchestration
+- chat, reminder, workspace, and integration APIs
+- serving UI surfaces
+- persisting conversations and reminders
+
+### Clients
+
+Jarvin currently has four client surfaces:
+
+- legacy Gradio UI at `/ui`
+- shared React shell served from `/app/`
+- Tauri desktop app
+- Tauri Android shell
+
+The desktop and mobile clients reuse the same React frontend and talk to the Python host over HTTP.
+
+## Main Runtime Paths
+
+### Typed Chat
+
+1. A client sends `POST /chat`
+2. The chat route first tries natural-language tool handling
+3. If a tool or planner handles the turn, the tool reply is returned and optionally spoken
+4. Otherwise Jarvin falls back to normal LLM chat generation
+5. The turn is persisted to SQLite
+
+### Remote Voice
+
+1. A phone client records local microphone audio
+2. The client uploads audio to the host transcription path
+3. Whisper transcribes on the host
+4. The transcribed text is sent through normal chat handling
+5. Jarvin optionally synthesizes reply audio on the host
+6. The client plays that reply through the phone speakers
+
+### Host Listener
+
+Jarvin still supports the host-side always-on listener path:
 
 1. microphone capture
-2. adaptive VAD / utterance detection
+2. VAD / utterance detection
 3. Whisper transcription
-4. local GGUF LLM reply generation
-5. optional local TTS
-6. FastAPI + Gradio display / control
+4. local LLM reply
+5. optional host-side playback
 
-Normal operation is intended to stay on-device. Models may be downloaded once during setup, but regular inference does not call cloud APIs.
-The planned deployment shape is one trusted host machine serving the app and model runtimes, with other personal devices connecting privately over VPN as thin clients.
+This path is separate from the phone mic flow.
 
-## Startup Flow
+## Core Components
 
-1. `python server.py` starts the app from repo root.
-2. [`server.py`](../server.py) re-launches itself under the repo `.venv` if needed, then builds the FastAPI app and mounted Gradio UI.
-3. [`backend/api/app.py`](../backend/api/app.py) handles lifespan startup:
-   - creates `app.state.stop_event`
-   - auto-provisions / loads the local LLM if enabled
-   - starts the background listener task if `start_listener_on_boot` is true
-4. The listener task in [`backend/listener/runner.py`](../backend/listener/runner.py):
-   - creates the cached Whisper ASR object
-   - opens the selected mic device
-   - calibrates the VAD
-   - loops on utterances and forwards each one to the processing pipeline
+### API App
 
-## Main Runtime Path
+`backend/api/app.py`
 
-### Audio Capture
+Composes the FastAPI app, mounts routers, serves the shared frontend at `/app/`, mounts temp audio assets, and still mounts the legacy Gradio surface.
 
-- [`audio/vad/`](../audio/vad) contains the streaming VAD implementation.
-- [`backend/listener/loop.py`](../backend/listener/loop.py) wraps the VAD into a simple blocking API that the async runner can call via `asyncio.to_thread`.
+### Chat And Tool Routing
 
-### Utterance Processing
+`backend/api/routes/chat.py`
+`backend/agent/chat_tools.py`
 
-- [`backend/core/pipeline.py`](../backend/core/pipeline.py) is the core turn-processing function.
-- In the hot path, it runs ASR from in-memory PCM, builds short context from saved profile + recent turns, asks the local LLM for a reply, persists the turn, and optionally synthesizes TTS.
-- It still writes a temp WAV for playback/debug state, but Whisper no longer depends on that file round-trip.
+This layer does the assistant orchestration.
 
-### ASR
+It currently handles:
 
-- [`backend/asr/whisper.py`](../backend/asr/whisper.py) owns Whisper model caching and device selection.
-- GPU is preferred automatically when CUDA is available.
-- The current implementation keeps LayerNorm in fp32 on CUDA to avoid mixed-precision errors seen on some Torch / Whisper combinations.
-- The listener path can now transcribe normalized in-memory PCM directly, which avoids a temporary WAV dependency on every turn.
+- explicit `/tool ...` commands
+- natural-language planner routing
+- pending confirmations for risky calendar changes
+- fallback to normal LLM chat when no tool path applies
 
-### LLM
+### Planner Layer
 
-- [`backend/llm/model_manager.py`](../backend/llm/model_manager.py) chooses and downloads the GGUF model.
-- [`backend/llm/runtime_llama_cpp.py`](../backend/llm/runtime_llama_cpp.py) owns the cached `llama-cpp-python` runtime.
-- [`backend/llm/runtime_router.py`](../backend/llm/runtime_router.py) dispatches between embedded `llama.cpp` and optional service backends.
-- [`backend/llm/runtime_ollama.py`](../backend/llm/runtime_ollama.py) talks to Ollama as a headless HTTP inference service only.
-- [`backend/util/windows_dll.py`](../backend/util/windows_dll.py) primes Windows DLL search paths so CUDA-backed `llama-cpp-python` wheels can find the runtime libraries they need.
-- Jarvin still owns prompts, modes, persistence, and UI behavior even when inference is delegated to another local process.
+Jarvin now uses domain-specific planners instead of relying only on brittle regex.
 
-### UI and Live State
+Current planners:
 
-- [`backend/listener/live_state.py`](../backend/listener/live_state.py) is the shared in-memory state between the listener and the UI/API.
-- [`ui/app.py`](../ui/app.py) builds the Gradio app.
-- The UI uses polling and a sequence-based update model so transcript/reply rendering only advances when a new utterance snapshot is published.
+- `backend/agent/weather_tools.py`
+- `backend/agent/calendar_tools.py`
+- `backend/agent/reminder_planner.py`
+- `backend/agent/workspace_tools.py`
+- `backend/agent/research_tools.py`
+- `backend/agent/brief_planner.py`
 
-## Persistence
+The shared follow-up layer:
 
-- [`memory/conversation.py`](../memory/conversation.py) owns the SQLite connection, migrations, active conversation tracking, history, and user profile state.
-- The database lives under `data/` by default and is configured via [`config.py`](../config.py).
-- Conversation history is now multi-conversation, with the active conversation tracked in `app_state`.
+- `backend/agent/followup_context.py`
+- `backend/agent/followup_router.py`
+
+keeps short-lived active-domain context so ambiguous follow-ups like `how about tomorrow?` or `show me more` stay attached to the right tool domain.
+
+### Tool Execution
+
+`backend/agent/tools.py`
+`backend/agent/external_tools.py`
+
+These modules provide deterministic host-side actions such as:
+
+- workspace search
+- file reads
+- directory listing
+- allowlisted commands
+- weather lookup
+- web research
+- Google Calendar operations
+
+### ASR, LLM, And TTS
+
+- `backend/asr/whisper.py`
+- `backend/llm/runtime_llama_cpp.py`
+- `backend/llm/runtime_router.py`
+- `backend/llm/runtime_ollama.py`
+- `backend/tts/engine.py`
+
+Jarvin prefers local inference and offline voice where possible. Optional external services exist only for integrations like web search or Google Calendar.
+
+### Persistence
+
+Conversation and profile state:
+
+- `memory/conversation.py`
+
+Reminder and routine state:
+
+- `memory/reminders.py`
+
+The default database location is:
+
+- `data/jarvin.sqlite3`
+
+### Client Frontend
+
+Shared React frontend:
+
+- `clients/jarvin-ui/src`
+
+Desktop shell:
+
+- `clients/jarvin-ui/src-tauri`
+
+The shared client is also built for host serving under `/app/`, which gives a browser-accessible shell over WireGuard without needing a separate web app codebase.
+
+## Major Product Capabilities
+
+### Assistant Domains
+
+Jarvin currently has meaningful support for:
+
+- weather
+- calendar lookup and event CRUD
+- reminders and routines
+- morning / daily briefs
+- workspace and repo operations
+- web research
+
+### Response Enrichment
+
+Tool replies can carry structured payloads back through the chat API.
+
+Example:
+
+- weather replies include visual card data such as icon, temperature, rain chance, wind, and location
+
+This allows the client to render richer responses than plain text alone.
+
+## Integrations
+
+### Search
+
+Default provider:
+
+- DuckDuckGo Lite
+
+Jarvin can search, fetch top pages, and summarize what it found.
+
+### Weather
+
+- Open-Meteo
+
+### Calendar
+
+- Google Calendar via OAuth desktop credentials and a saved token on the host
 
 ## Important Invariants
 
-- `process_utterance()` persists turns. The listener must not append the same turns again.
-- `set_snapshot()` is what advances the live sequence number. `set_status()` updates flags without creating a new turn event.
-- The repo is Windows-first right now. GPU setup assumes the Windows CUDA wheel path documented in `requirements-gpu-cu128.txt`.
-- Keep the app local-first unless there is a deliberate product decision to add networked tools.
-- Prefer host-centric designs: the eventual target is one private Jarvin host serving multiple personal devices over VPN, not separate full inference stacks on every client.
-- Prefer additive schema changes in `memory/conversation.py`; users may already have local data.
+- The host is the source of truth for state, tools, and integrations.
+- Clients are thin shells and should not own durable assistant state.
+- Planner output should stay constrained and feed deterministic tool calls.
+- Risky actions should remain confirmable and auditable.
+- Natural-language flexibility should come from planner layers, not from letting the LLM freestyle raw side effects.
 
-## Key Files To Know
+## Key Files
 
-- [`server.py`](../server.py): startup entrypoint and `.venv` auto-launch behavior
-- [`config.py`](../config.py): global settings and env-driven knobs
-- [`backend/api/app.py`](../backend/api/app.py): FastAPI lifespan and router composition
-- [`backend/listener/runner.py`](../backend/listener/runner.py): background audio loop orchestration
-- [`backend/core/pipeline.py`](../backend/core/pipeline.py): one utterance in, one turn out
-- [`backend/asr/whisper.py`](../backend/asr/whisper.py): Whisper device/runtime behavior
-- [`backend/llm/runtime_llama_cpp.py`](../backend/llm/runtime_llama_cpp.py): llama.cpp runtime loading and GPU handling
-- [`memory/conversation.py`](../memory/conversation.py): SQLite persistence and conversation state
-- [`ui/app.py`](../ui/app.py): Gradio app assembly
+- `server.py`: entrypoint and `.venv` relaunch behavior
+- `config.py`: settings, env loading, `.env` support
+- `backend/api/app.py`: FastAPI composition and frontend serving
+- `backend/api/routes/chat.py`: chat + tool response path
+- `backend/agent/chat_tools.py`: central assistant router
+- `backend/agent/external_tools.py`: external integrations and helper tools
+- `backend/agent/tools.py`: workspace-safe host tools
+- `memory/conversation.py`: conversations and profile
+- `memory/reminders.py`: reminders and routines
+- `clients/jarvin-ui/src/App.tsx`: shared client entrypoint

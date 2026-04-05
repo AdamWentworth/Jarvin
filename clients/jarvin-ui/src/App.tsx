@@ -51,6 +51,7 @@ import {
   type ConnectionState,
   type SendSource,
 } from "./lib/runtime";
+import { useReminderNotifications } from "./hooks/useReminderNotifications";
 import { useRemoteVoice } from "./hooks/useRemoteVoice";
 import { ConversationSidebar } from "./components/ConversationSidebar";
 import { ChatWorkspace } from "./components/ChatWorkspace";
@@ -58,6 +59,7 @@ import { SettingsOverlay } from "./components/SettingsOverlay";
 import { describeError, syncWorkspaceState } from "./lib/workspace";
 
 function App() {
+  const apiBaseUrl = getApiBaseUrl();
   const [profile, setProfile] = useState<UserProfilePayload>(DEFAULT_PROFILE);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -125,6 +127,23 @@ function App() {
       await handleSendMessage(text, source);
     },
   });
+  const {
+    notificationsEnabled,
+    notificationsSupported,
+    notificationPermission,
+    notificationStatus,
+    notificationSyncing,
+    scheduledReminderCount,
+    lastNotificationSyncAt,
+    requestNotificationsPermission,
+    sendTestNotification,
+    setNotificationsEnabled,
+    syncReminderNotifications,
+  } = useReminderNotifications({
+    apiBaseUrl,
+    isClientOnline,
+    describeError,
+  });
 
   const currentListenerStatus = useMemo(
     () => statusLabel(status, live),
@@ -151,6 +170,10 @@ function App() {
   const lastSuccessfulContactLabel = useMemo(
     () => formatTimestamp(lastSuccessfulContactAt),
     [lastSuccessfulContactAt],
+  );
+  const lastNotificationSyncLabel = useMemo(
+    () => formatTimestamp(lastNotificationSyncAt),
+    [lastNotificationSyncAt],
   );
 
   const chatMode = useMemo(
@@ -536,6 +559,9 @@ function App() {
         ...current,
         note: source === "remote_voice" ? "Remote speech completed its round trip." : "Typed message completed successfully.",
       }));
+      if (notificationsEnabled) {
+        void syncReminderNotifications();
+      }
       setChatStatus("");
     } catch (error) {
       setRemoteVoiceStage("chat", "error");
@@ -667,7 +693,7 @@ function App() {
         <section className="loading-card error-card">
           <div className="eyebrow">Host Unreachable</div>
           <h1>Jarvin is not answering yet</h1>
-          <p>The desktop client could not reach the host at <code>{getApiBaseUrl()}</code>.</p>
+          <p>The desktop client could not reach the host at <code>{apiBaseUrl}</code>.</p>
           <p className="section-status">{connectionError}</p>
           <label className="field-stack">
             <span>Host URL</span>
@@ -783,7 +809,7 @@ function App() {
       <SettingsOverlay
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        apiBaseUrl={getApiBaseUrl()}
+        apiBaseUrl={apiBaseUrl}
         apiBaseUrlDraft={apiBaseUrlDraft}
         onApiBaseUrlDraftChange={setApiBaseUrlDraft}
         onSaveApiBaseUrl={() => void handleSaveApiBaseUrl()}
@@ -832,6 +858,17 @@ function App() {
         isClientOnline={isClientOnline}
         health={health}
         remoteVoiceDiagnostics={remoteVoiceDiagnostics}
+        notificationsSupported={notificationsSupported}
+        notificationsEnabled={notificationsEnabled}
+        notificationPermission={notificationPermission}
+        notificationStatus={notificationStatus}
+        notificationSyncing={notificationSyncing}
+        scheduledReminderCount={scheduledReminderCount}
+        lastNotificationSyncLabel={lastNotificationSyncLabel}
+        onSetNotificationsEnabled={(value) => void setNotificationsEnabled(value)}
+        onRequestNotificationsPermission={() => void requestNotificationsPermission()}
+        onSyncNotifications={() => void syncReminderNotifications()}
+        onSendTestNotification={() => void sendTestNotification()}
         profile={profile}
         onProfileChange={setProfile}
         onSaveProfile={(event) => void handleSaveProfile(event)}

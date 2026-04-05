@@ -2,9 +2,10 @@
 
 ## Environment
 
-- Run commands from repo root.
-- Use Python 3.11 for the project venv.
-- If the base Python installation changes, recreate `.venv`.
+- Run commands from the repo root.
+- Use Python 3.11 for the project virtual environment.
+- Jarvin loads `.env` automatically from the repo root.
+- Environment variables use the `JARVIN_` prefix.
 
 ## Create Or Recreate The Venv
 
@@ -28,49 +29,51 @@ Windows + NVIDIA GPU path:
 .\.venv\Scripts\python -m pip install -e .
 ```
 
-## Optional Headless Ollama Backend
+## Core Host Startup
 
-Jarvin can use Ollama as an inference service without using any Ollama UI.
-Jarvin still owns the app UI, prompts, and behavior.
-
-Example env overrides:
-
-```powershell
-$env:JARVIN_LLM_BACKEND = "ollama_http"
-$env:JARVIN_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-$env:JARVIN_OLLAMA_MODEL = "your-model-tag"
-```
-
-Notes:
-
-- Jarvin does not auto-pull Ollama models.
-- Provision the Ollama model yourself on the host machine.
-- If you want the embedded path again, set `JARVIN_LLM_BACKEND=llama_cpp`.
-
-## Run The App
-
-Friendly path:
+Run Jarvin from the repo root:
 
 ```powershell
 python server.py
 ```
 
-Explicit venv path:
+The default host bind is:
 
-```powershell
-.\.venv\Scripts\python server.py
+```text
+http://0.0.0.0:8000
+```
+
+Useful local entry points:
+
+- `http://127.0.0.1:8000/ui` for the legacy Gradio UI
+- `http://127.0.0.1:8000/app/` for the shared React shell
+
+## Useful `.env` Settings
+
+Minimal common settings:
+
+```dotenv
+JARVIN_LLM_BACKEND=llama_cpp
+JARVIN_AGENT_WEB_SEARCH_PROVIDER=duckduckgo_lite
+JARVIN_DEFAULT_WEATHER_LOCATION=Seattle
+```
+
+Useful integration paths:
+
+```dotenv
+JARVIN_GOOGLE_CALENDAR_CREDENTIALS_FILE=secrets/google-calendar-client.json
+JARVIN_GOOGLE_CALENDAR_TOKEN_FILE=data/google-calendar-token.json
 ```
 
 ## Run The Desktop Shell
 
-The new desktop client lives in [clients/jarvin-ui](d:/Projects/Jarvin/clients/jarvin-ui).
-It talks to the Python host over HTTP, so start the host first:
+Start the host first:
 
 ```powershell
 python server.py
 ```
 
-Then in a second terminal:
+Then in another terminal:
 
 ```powershell
 cd clients\jarvin-ui
@@ -85,16 +88,16 @@ cd clients\jarvin-ui
 npm run tauri build -- --debug --no-bundle
 ```
 
-Override the host URL if needed:
+Override the API base URL if needed:
 
 ```powershell
 $env:VITE_JARVIN_API_BASE_URL = "http://127.0.0.1:8000"
 npm run tauri dev
 ```
 
-## Run The Shared Mobile / VPN Shell
+## Run The Shared `/app/` Shell
 
-Build the host-served frontend once:
+Build the host-served frontend:
 
 ```powershell
 cd clients\jarvin-ui
@@ -108,132 +111,180 @@ Then run the Jarvin host:
 python server.py
 ```
 
-Open the shared shell from another device over WireGuard:
+Open it from another device:
 
 ```text
-http://<wireguard-host-ip>:8000/app/
+http://<host-or-wireguard-ip>:8000/app/
 ```
 
 Notes:
 
-- The `/app/` shell reuses the same React client as the Tauri desktop app.
-- It uses the same origin as the Jarvin host automatically, so no extra API env var is required for the phone browser path.
-- Re-run `npm run build:host` whenever you change the shared frontend.
-- Host listener and input-device controls refer to microphones attached to the Jarvin PC, not the phone.
-- Remote browser microphone capture is a separate path and usually needs HTTPS or a Tauri mobile shell.
+- The `/app/` shell reuses the same React frontend as the Tauri desktop app.
+- It talks to the same origin automatically, so no extra API env var is needed for the browser path.
+- Remote browser microphone capture is limited by browser secure-context rules. Plain HTTP over WireGuard is fine for typed chat, but phone mic access is better through the Tauri mobile shell.
 
 ## Build The Tauri Android Shell
 
-The shared React client can also run inside a Tauri Android shell, which is the preferred path for phone voice because it avoids the browser secure-context problems that block remote mic capture on plain HTTP.
-
-Machine paths currently working on this PC:
-
-- Android SDK: `%LOCALAPPDATA%\Android\Sdk`
-- Android NDK: `%LOCALAPPDATA%\Android\Sdk\ndk\27.2.12479018`
-- Java: `C:\Program Files\Java\jdk-20`
-
-Fast path for a Pixel 8 Pro style device:
+From the client directory:
 
 ```powershell
 cd clients\jarvin-ui
 npm run tauri:android:pixel:debug
 ```
 
-That helper will:
+This helper will:
 
-- initialize the Android project if it is missing
-- ensure the phone-mic permissions are present in the generated Android manifest
+- initialize the Android project if needed
 - build the shared frontend
-- target `aarch64` / `arm64`
-- fall back to direct Gradle packaging if Windows blocks the Tauri symlink step
+- target `arm64`
+- fall back to direct Gradle packaging on Windows when Tauri hits the symlink issue
 
-Expected APK output:
+Primary artifact path:
+
+```text
+clients/jarvin-ui/artifacts/jarvin-mobile-arm64-debug.apk
+```
+
+Generated Gradle output path:
 
 ```text
 clients/jarvin-ui/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
 ```
 
-Notes:
+## Install The Android APK
 
-- The debug APK allows cleartext HTTP so it can reach `http://<wireguard-host-ip>:8000` over WireGuard.
-- The mobile client should use the in-app `Host URL` setting to point at the Jarvin machine.
-- If you enable Windows Developer Mode later, the plain `npm run tauri:android:build -- --debug --target aarch64` path should become cleaner because Tauri will be allowed to create the symlink it wants during packaging.
+If the phone is connected over USB with developer mode and USB debugging enabled:
 
-## GPU Diagnostics
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" install -r "D:\Projects\Jarvin\clients\jarvin-ui\artifacts\jarvin-mobile-arm64-debug.apk"
+```
+
+## Mobile Host Connection
+
+When the Android app opens:
+
+1. Open `Settings`
+2. Set `Host URL` to your Jarvin host, for example:
+
+```text
+http://10.x.x.x:8000
+```
+
+3. Save and reconnect
+
+The mobile shell should use the phone microphone and speakers, while host listener controls still refer to audio devices on the Jarvin PC.
+
+## Search Integration
+
+Jarvin currently uses DuckDuckGo Lite as the default search provider.
+
+Validate search:
+
+```powershell
+.\.venv\Scripts\python scripts\validate_integrations.py --search-only --query "llama.cpp windows cuda docs"
+```
+
+Expected result:
+
+- `status=ok`
+- `provider=duckduckgo_lite`
+- non-zero `results`
+
+## Google Calendar Setup
+
+1. Create a Google OAuth desktop client in Google Cloud.
+2. Save the JSON file as:
+
+```text
+secrets/google-calendar-client.json
+```
+
+3. Start Jarvin:
+
+```powershell
+python server.py
+```
+
+4. In chat, say one of:
+
+```text
+connect my Google Calendar
+authorize my Google Calendar
+```
+
+5. Complete the browser OAuth flow on the host machine.
+
+The saved token lands at:
+
+```text
+data/google-calendar-token.json
+```
+
+Validate calendar setup:
+
+```powershell
+.\.venv\Scripts\python scripts\validate_integrations.py --calendar-only
+```
+
+## Things To Try In Chat
+
+Weather:
+
+```text
+What's the weather in Burnaby near Metrotown?
+How about tomorrow?
+```
+
+Calendar:
+
+```text
+What's on my calendar today?
+Put lunch with Sam on my calendar tomorrow at noon.
+Move lunch with Sam back an hour.
+Delete lunch with Sam from my calendar.
+```
+
+Reminders and briefs:
+
+```text
+Remind me to call mom tomorrow at 5pm.
+Every weekday at 8am remind me to stretch.
+Give me my morning brief.
+```
+
+Workspace and research:
+
+```text
+Could you look through the codebase for include_router?
+Pull up backend/api/app.py lines 10 to 30.
+Research llama.cpp windows cuda docs for me.
+What else did you find?
+```
+
+## Useful Test Commands
+
+Full backend suite:
+
+```powershell
+.\.venv\Scripts\python -m pytest tests\backend -q
+```
+
+Targeted integration checks:
+
+```powershell
+.\.venv\Scripts\python scripts\validate_integrations.py --search-only
+.\.venv\Scripts\python scripts\validate_integrations.py --calendar-only
+```
+
+GPU diagnostics:
 
 ```powershell
 .\.venv\Scripts\python scripts\diagnose_gpu.py
 ```
 
-What a healthy result should show:
-
-- Torch version ending in `+cu128`
-- `cuda_available=True`
-- a detected NVIDIA device
-- `llama-cpp-python` importing successfully
-- `ggml_cuda_init` output listing the GPU
-
-## Useful Test Commands
-
-Full suite:
-
-```powershell
-.\.venv\Scripts\python -m pytest
-```
-
-Fast targeted checks:
-
-```powershell
-.\.venv\Scripts\python -m pytest tests\test_server_launcher.py -q
-.\.venv\Scripts\python -m pytest tests\backend\llm\test_runtime_llama_cpp.py tests\backend\util\test_hw_detect.py -q
-.\.venv\Scripts\python -m pytest tests\config\test_settings.py tests\memory\test_conversation.py -q
-```
-
-## Assistant Tool Setup
-
-Jarvin now exposes explicit host-side assistant tools.
-
-Quick checks from chat:
-
-```text
-/tool help
-/tool weather Seattle
-/tool web local llama cpp docs
-/tool run git status
-```
-
-Google Calendar setup:
-
-1. Create a Google OAuth desktop client in Google Cloud.
-2. Save the downloaded JSON file as `secrets/google-calendar-client.json`.
-3. Start Jarvin with `python server.py`.
-4. From chat, run:
-
-```text
-/tool calendar auth
-```
-
-That will open a local browser on the host machine for the first authorization and store the token at `data/google-calendar-token.json`.
-
-Optional env overrides:
-
-```powershell
-$env:JARVIN_AGENT_WEB_SEARCH_PROVIDER = "duckduckgo_lite"
-$env:JARVIN_GOOGLE_SEARCH_API_KEY = ""
-$env:JARVIN_GOOGLE_SEARCH_ENGINE_ID = ""
-$env:JARVIN_GOOGLE_CALENDAR_CREDENTIALS_FILE = "secrets/google-calendar-client.json"
-$env:JARVIN_GOOGLE_CALENDAR_TOKEN_FILE = "data/google-calendar-token.json"
-```
-
 ## Common Troubleshooting
 
 ### Venv Broken After Python Changes
-
-Symptom:
-
-- `.venv\Scripts\python` points at a removed or moved base interpreter
-
-Fix:
 
 ```powershell
 Remove-Item -Recurse -Force .venv
@@ -242,22 +293,33 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
 ```
 
-### Whisper Or Torch Not Using GPU
+### Android App Connects But Voice Fails
 
-Run:
+Check:
 
-```powershell
-.\.venv\Scripts\python scripts\diagnose_gpu.py
+- the phone `Host URL`
+- that the host is running
+- that the phone can reach `http://<host-ip>:8000/healthz`
+- that the app build is current if client-side voice code changed
+
+### Calendar Exists But Is Not Authorized
+
+The validator will show:
+
+- credentials present
+- token missing
+
+In that case, re-run the auth flow from chat.
+
+### Search Provider Confusion
+
+If search should stay on DuckDuckGo Lite, keep:
+
+```dotenv
+JARVIN_AGENT_WEB_SEARCH_PROVIDER=duckduckgo_lite
 ```
 
-If Torch reports `+cpu`, reinstall from `requirements-gpu-cu128.txt`.
+### Host-Only Vs Client-Only Audio
 
-### `llama-cpp-python` Tries To Build From Source
-
-The canonical fix is to install through `requirements-gpu-cu128.txt`, which includes the extra wheel indices for both Torch and the official Windows CUDA wheels for `llama-cpp-python`.
-
-### Microphone Issues
-
-- Check Windows microphone permissions.
-- Use the UI or `/audio/devices` route to confirm the selected input device.
-- Prefer the included mic scripts for quick hardware checks before changing core audio code.
+- Host listener controls operate on microphones attached to the Jarvin PC
+- Remote phone voice uses the phone microphone and speakers through the mobile client

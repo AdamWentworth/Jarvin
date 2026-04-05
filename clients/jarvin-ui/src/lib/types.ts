@@ -69,6 +69,24 @@ export interface TranscribeResponse {
   transcribed_text: string;
 }
 
+export interface ReminderItem {
+  id: number;
+  title: string;
+  notes: string;
+  due_at: string;
+  recurrence: string;
+  status: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+  is_routine: boolean;
+  is_overdue: boolean;
+}
+
+export interface ReminderListResponse {
+  reminders: ReminderItem[];
+}
+
 export interface HealthResponse {
   status: string;
   listening: boolean;

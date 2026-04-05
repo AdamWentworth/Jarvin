@@ -1,6 +1,6 @@
 import type { ChatMode, ConversationSummary, LiveSnapshot, StatusResponse, UserProfilePayload } from "./types";
 
-export type InspectorSection = "assistant" | "voice" | "profile" | "diagnostics";
+export type InspectorSection = "assistant" | "voice" | "notifications" | "profile" | "diagnostics";
 export type ReasoningEffort = "low" | "medium" | "high" | "extra_high";
 
 export const MODE_OPTIONS: Array<{ value: ChatMode; label: string }> = [
@@ -28,6 +28,7 @@ export const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }>
 export const INSPECTOR_SECTIONS: Array<{ value: InspectorSection; label: string }> = [
   { value: "assistant", label: "Assistant" },
   { value: "voice", label: "Voice" },
+  { value: "notifications", label: "Notifications" },
   { value: "profile", label: "Profile" },
   { value: "diagnostics", label: "Diagnostics" },
 ];

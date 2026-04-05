@@ -1,160 +1,168 @@
 # Jarvin Roadmap
 
-## Current Goal
+## Current Direction
 
-Build Jarvin into a private, host-run personal AI assistant that supports:
+Jarvin is a private, host-run personal AI assistant.
 
-- typed chat
-- voice conversation
-- agent / task execution workflows
-- multiple operating modes
-- remote access from personal devices over VPN
-- a phone acting as a remote voice client with microphone input and spoken output
+The intended shape is:
+
+- one Windows host machine running the backend, models, GPU inference, and durable state
+- desktop and phone clients connecting to that host over local network or WireGuard
+- voice, tools, memory, and integrations layered on top of a local-first core
+
+The goal is not to train a brand-new foundation model. The goal is to build a strong assistant system around good local models, reliable tool use, useful memory, and polished clients.
 
 ## What Exists Today
 
-- local-first FastAPI + Gradio app
-- typed chat endpoint and UI path
-- embedded local LLM via `llama-cpp-python`
-- optional headless Ollama backend with Jarvin-controlled UX
-- local GPU-enabled inference on the current Windows machine
-- conversation persistence in SQLite
-- multi-conversation history and basic user profile context
-- Whisper ASR path
-- optional TTS path
-- basic live status / listener state plumbing
-- documentation for architecture, setup, product direction, and model strategy
+- FastAPI host with a legacy Gradio UI at `/ui`
+- shared React frontend served at `/app/`
+- Tauri desktop client
+- Tauri Android shell for phone testing
+- typed chat with multi-conversation history
+- mobile/VPN voice path:
+  - phone microphone upload
+  - host-side transcription
+  - spoken reply playback on the phone
+- local `llama.cpp` runtime with optional Ollama backend support
+- SQLite-backed profile and conversation persistence
+- reminder and routine storage with CRUD APIs
+- morning briefs that combine weather, calendar, and reminders
+- weather lookup with visual weather cards in the client
+- Google Calendar integration with event CRUD
+- web research via DuckDuckGo-backed search, page fetch, and summarization
+- safe host-side tools for:
+  - repo search
+  - file reads
+  - directory listing
+  - limited command execution
+- natural-language planners for:
+  - weather
+  - calendar
+  - reminders
+  - workspace actions
+  - research
+  - briefs
+- shared follow-up routing so ambiguous short replies stay in the right domain
 
-## Mentioned Goals Not Fully Built Yet
+## What Is Still Missing Or Thin
 
-- first-class mode switching in the UI
-- remote phone voice access over VPN
-- stronger agent / tool execution workflows
-- mobile-friendly client experience
-- stronger authentication and session handling
-- richer memory and project-aware context
-- better action logging and auditability
-- model selection and tuning from the UI
-- asynchronous / more polished response streaming
-- better local TTS
+- real authentication and session guardrails for remote clients
+- explicit permission / approval flows for risky host actions
+- proactive notifications on the phone
+- stronger long-term memory and preference storage
+- background jobs and watch-style agents
+- richer integrations such as email, messaging, and home/device control
+- better action tracing, auditability, and operator logs
+- more polished streaming and interruption behavior
+- stronger TTS quality and voice options
 
-## High-Value Features We Have Barely Touched
+## Phase Status
 
-- explicit tool permission model
-- project/workspace contexts
-- background jobs and long-running tasks
-- exportable conversations and notes
-- saved preferences and pinned facts
-- settings UI
-- model benchmarking harness
-- mobile-first interaction design
-- remote audio transport design
+### Phase 1: Core Local Assistant
 
-## Phased Roadmap
+Status: largely done
 
-### Phase 1: Strong Typed Assistant
+- local LLM runtime
+- typed chat
+- conversation persistence
+- basic profile context
+- reminders, routines, and briefs
 
-Focus on making Jarvin genuinely useful without local audio hardware.
+### Phase 2: Tooling And Planner Layer
 
-- add first-class mode presets such as `voice_fast`, `chat_balanced`, and `agent_strong`
-- improve typed chat UX for desktop and mobile browsers
-- expose model/backend selection in a controlled UI
-- improve conversation controls: rename, archive, export, pin
-- add better progress states such as thinking, running, and speaking
+Status: in progress, but already useful
 
-Why this comes first:
+- safe host-side tool layer exists
+- natural-language planners now cover core domains
+- follow-up routing has started to reduce brittle phrasing
 
-- it improves the product immediately on the current setup
-- it strengthens the core assistant behavior before more complex voice work
-- it supports the future remote-client experience too
+Still needed:
 
-### Phase 2: Agent Foundations
+- confirmation model for risky actions beyond calendar edits
+- better traces and permission UX
+- more robust multi-step task execution
 
-Focus on safe, useful action-taking.
+### Phase 3: Remote Clients And Mobile Voice
 
-- add a tool abstraction layer
-- start with safe local tools such as file read, repo search, and command execution
-- add permission prompts and clear boundaries for risky actions
-- add action logs and auditable traces
-- introduce workspace-aware context for coding and project tasks
+Status: in progress, working for real use
 
-Why this matters:
+- shared React client
+- Tauri desktop shell
+- host-served `/app/` shell
+- Tauri Android shell
+- remote mic upload and phone speaker playback
 
-- it moves Jarvin closer to the "personal Codex" goal
-- it gives typed mode real leverage even before voice is polished
+Still needed:
 
-### Phase 3: Memory And Personalization
+- richer mobile notifications
+- smoother reconnect and session UX
+- more polished interruption and streaming audio behavior
 
-Focus on making Jarvin feel persistent and helpful over time.
+### Phase 4: Reliability, Guardrails, And Operations
 
-- add short summaries instead of only raw turn history
-- store preferences, recurring facts, and pinned context
-- support per-project or per-topic working memory
-- separate ephemeral context from durable memory
+Status: next major focus
 
-Why this matters:
+- remote auth
+- better diagnostics and action logs
+- safer tool approval model
+- clearer host health and background task monitoring
 
-- better memory improves both chat and agent workflows
-- it reduces the need for long prompts on current hardware
+### Phase 5: Proactive Assistant Behavior
 
-### Phase 4: Remote Host Experience
+Status: next major product leap
 
-Focus on the "one host, many private clients" shape.
+- scheduled morning brief delivery
+- due reminder notifications
+- host health alerts
+- assistant-initiated nudges instead of request-only behavior
 
-- improve authentication for private remote access
-- make the UI genuinely usable from a phone browser over VPN
-- support multiple concurrent clients and sessions cleanly
-- keep inference and heavy state on the host machine
-- improve service boundaries so headless backends are easy to operate
+### Phase 6: Memory And Personalization
 
-Why this matters:
+Status: early groundwork only
 
-- this is the deployment shape the project is actually aiming for
-- client hardware becomes mostly irrelevant if the host does the work
+- durable preferences
+- pinned facts
+- project-aware memory
+- better summaries instead of raw turn reliance
+- user-specific style and routine adaptation
 
-### Phase 5: Remote Voice Client
+### Phase 7: Richer Integrations And Background Agents
 
-Focus on voice again, but through the phone and VPN path rather than local desktop audio devices.
+Status: later
 
-- let a phone send microphone audio to Jarvin over the private network
-- let Jarvin return text plus playable spoken audio to the phone
-- make voice round-trips low-latency enough to feel conversational
-- support interruption, stop-talking, and resume behavior
-- decide whether transport should stay request/response first or evolve toward streaming audio
+- email
+- messaging
+- downloads and system tasks
+- background research or repo-watch agents
+- device / smart-home style integrations
 
-Why this is exciting:
+### Phase 8: Quality Upgrades
 
-- it unblocks voice usage even when the host machine has no attached mic or speakers
-- it matches the real-world way the system will likely be used
+Status: later
 
-### Phase 6: Voice Polish And Higher-End Models
+- stronger models as hardware improves
+- better TTS engines
+- better streaming and interruption
+- smarter per-mode routing and benchmarking
 
-Focus on improving quality after the product shape is solid.
+## Best Next Slices
 
-- benchmark stronger models as host hardware improves
-- evaluate better TTS engines
-- improve ASR latency/accuracy tradeoffs by mode
-- add richer voice settings and personas
+If we are choosing what to build next, the highest-value slices are:
 
-Why this comes later:
-
-- the product gets more value first from better modes, tools, and hosting shape
-- better hardware will make later model decisions more meaningful
-
-## Best Next Steps
-
-If choosing the next implementation slice today, prefer:
-
-1. mode presets and typed/mobile UX
-2. tool abstraction and safe agent actions
-3. remote-host authentication and session model
-4. remote phone voice path over VPN
+1. phone notifications for reminders and briefs
+2. explicit permission / confirmation flow for risky host actions
+3. lightweight auth for remote clients
+4. richer long-term memory and saved preferences
+5. background jobs and watch-style tasks
 
 ## Decision Rule
 
-When prioritizing between features, prefer the work that improves all future modes at once:
+When choosing between features, prefer the work that makes Jarvin feel more like an actual assistant instead of a collection of commands.
 
-- backend abstraction beats one more hardcoded model
-- mobile-friendly chat UX beats local desktop-only polish
-- safe tooling beats raw prompt tweaks
-- host/client architecture beats assumptions that all hardware is local
+That usually means:
+
+- planner + tool improvements over more regex
+- client reliability over one-off UI polish
+- proactive delivery over another passive endpoint
+- safe orchestration over raw power
+- host/client architecture over device-specific hacks

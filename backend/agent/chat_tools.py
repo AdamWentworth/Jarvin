@@ -15,9 +15,21 @@ from backend.agent.calendar_tools import (
     CalendarPlan,
     maybe_plan_calendar_request,
 )
+from backend.agent.followup_context import (
+    get_active_follow_up_domain,
+    remember_active_follow_up_domain,
+)
+from backend.agent.followup_router import (
+    has_conflicting_domain_cues,
+    looks_like_ambiguous_follow_up,
+)
 from backend.agent.reminder_tools import (
     handle_reminder_command,
     maybe_handle_reminder_request,
+)
+from backend.agent.research_tools import (
+    maybe_plan_research_request,
+    remember_research_context,
 )
 from backend.agent.weather_tools import (
     maybe_handle_weather_request,
@@ -150,18 +162,20 @@ class ToolChatResponse:
     reply: str = ""
     tool_kind: str | None = None
     tool_payload: dict[str, object] | None = None
+    active_domain: str | None = None
 
 
 def maybe_handle_assistant_tool_request(text: str, *, conversation_id: int | None = None) -> ToolChatResponse:
     pending = _maybe_handle_pending_confirmation(text, conversation_id=conversation_id)
     if pending.handled:
-        return pending
+        return _finalize_tool_response(pending, conversation_id=conversation_id)
 
     explicit = maybe_handle_tool_command(text, conversation_id=conversation_id)
     if explicit.handled:
-        return explicit
+        return _finalize_tool_response(explicit, conversation_id=conversation_id)
 
-    return maybe_handle_natural_language_tool_request(text, conversation_id=conversation_id)
+    natural = maybe_handle_natural_language_tool_request(text, conversation_id=conversation_id)
+    return _finalize_tool_response(natural, conversation_id=conversation_id)
 
 
 def maybe_handle_tool_command(text: str, *, conversation_id: int | None = None) -> ToolChatResponse:
@@ -178,29 +192,30 @@ def maybe_handle_tool_command(text: str, *, conversation_id: int | None = None) 
     rest = rest.strip()
 
     if verb in {"ls", "list"}:
-        return _safe_tool_call(lambda: _list_reply(rest or "."), "I couldn't list that directory.")
+        return _safe_tool_call(lambda: _list_reply(rest or "."), "I couldn't list that directory.", active_domain="workspace")
     if verb == "search":
-        return _safe_tool_call(lambda: _repo_search_reply(rest), "I couldn't search the workspace.")
+        return _safe_tool_call(lambda: _repo_search_reply(rest), "I couldn't search the workspace.", active_domain="workspace")
     if verb == "read":
-        return _safe_tool_call(lambda: _read_reply(rest), "I couldn't read that file.")
+        return _safe_tool_call(lambda: _read_reply(rest), "I couldn't read that file.", active_domain="workspace")
     if verb in {"write", "append"}:
-        return _safe_tool_call(lambda: _write_reply(rest, append=verb == "append"), "I couldn't write that file.")
+        return _safe_tool_call(lambda: _write_reply(rest, append=verb == "append"), "I couldn't write that file.", active_domain="workspace")
     if verb == "run":
-        return _safe_tool_call(lambda: _run_reply(rest), "I couldn't run that command.")
+        return _safe_tool_call(lambda: _run_reply(rest), "I couldn't run that command.", active_domain="workspace")
     if verb == "web":
-        return _safe_tool_call(lambda: _web_search_reply(rest), "I couldn't search the web just now.")
+        return _safe_tool_call(lambda: _web_search_reply(rest), "I couldn't search the web just now.", active_domain="research")
     if verb == "google":
-        return _safe_tool_call(lambda: _google_search_reply(rest, natural=False), "I couldn't use Google search just now.")
+        return _safe_tool_call(lambda: _google_search_reply(rest, natural=False), "I couldn't use Google search just now.", active_domain="research")
     if verb == "weather":
         return _safe_weather_tool_response(rest, conversation_id=conversation_id)
     if verb == "brief":
-        return _safe_tool_call(lambda: handle_brief_command(rest), "I couldn't build the morning brief just now.")
+        return _safe_tool_call(lambda: handle_brief_command(rest), "I couldn't build the morning brief just now.", active_domain="brief")
     if verb == "reminder":
-        return _safe_tool_call(lambda: handle_reminder_command(rest), "I couldn't manage reminders just now.")
+        return _safe_tool_call(lambda: handle_reminder_command(rest), "I couldn't manage reminders just now.", active_domain="reminder")
     if verb == "calendar":
         return _safe_tool_call(
             lambda: _calendar_command_reply(rest, conversation_id=conversation_id),
             "I couldn't work with your calendar just now.",
+            active_domain="calendar",
         )
 
     return ToolChatResponse(
@@ -215,19 +230,27 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return ToolChatResponse(handled=False)
 
     if _CALENDAR_AUTH_RE.search(message):
-        return _safe_tool_call(lambda: begin_google_calendar_auth(), "I couldn't start Google Calendar authorization.")
+        return _safe_tool_call(
+            lambda: begin_google_calendar_auth(),
+            "I couldn't start Google Calendar authorization.",
+            active_domain="calendar",
+        )
+
+    active_follow_up = _maybe_active_follow_up_response(message, conversation_id=conversation_id)
+    if active_follow_up is not None:
+        return active_follow_up
 
     weather_reply = _maybe_weather_tool_response(message, conversation_id=conversation_id)
     if weather_reply is not None:
         return weather_reply
 
-    brief_reply = maybe_handle_brief_request(message)
+    brief_reply = maybe_handle_brief_request(message, conversation_id=conversation_id)
     if brief_reply is not None:
-        return ToolChatResponse(handled=True, reply=brief_reply)
+        return ToolChatResponse(handled=True, reply=brief_reply, active_domain="brief")
 
     reminder_reply = maybe_handle_reminder_request(message, conversation_id=conversation_id)
     if reminder_reply is not None:
-        return ToolChatResponse(handled=True, reply=reminder_reply)
+        return ToolChatResponse(handled=True, reply=reminder_reply, active_domain="reminder")
 
     calendar_reply = _maybe_calendar_tool_response(message, conversation_id=conversation_id)
     if calendar_reply is not None:
@@ -237,14 +260,18 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
     if workspace_reply is not None:
         return workspace_reply
 
+    research_reply = _maybe_research_tool_response(message, conversation_id=conversation_id)
+    if research_reply is not None:
+        return research_reply
+
     details_match = _CALENDAR_DETAILS_RE.search(message)
     if details_match:
         query = _clean_query(details_match.group("query"))
-        return _safe_tool_call(lambda: _calendar_details_reply(query), "I couldn't open that calendar event.")
+        return _safe_tool_call(lambda: _calendar_details_reply(query), "I couldn't open that calendar event.", active_domain="calendar")
 
     calendar_create = _extract_calendar_create_text(message)
     if calendar_create:
-        return _safe_tool_call(lambda: _calendar_create_reply(calendar_create), "I couldn't create that calendar event.")
+        return _safe_tool_call(lambda: _calendar_create_reply(calendar_create), "I couldn't create that calendar event.", active_domain="calendar")
 
     rename_match = _CALENDAR_RENAME_RE.search(message) or _CALENDAR_TITLE_RE.search(message)
     if rename_match:
@@ -253,6 +280,7 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return _safe_tool_call(
             lambda: _calendar_update_request_reply(query, conversation_id=conversation_id, title=new_title),
             "I couldn't prepare that calendar title change.",
+            active_domain="calendar",
         )
 
     location_match = _CALENDAR_LOCATION_RE.search(message)
@@ -262,6 +290,7 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return _safe_tool_call(
             lambda: _calendar_update_request_reply(query, conversation_id=conversation_id, location=location),
             "I couldn't prepare that calendar location change.",
+            active_domain="calendar",
         )
 
     clear_location_match = _CALENDAR_CLEAR_LOCATION_RE.search(message)
@@ -270,6 +299,7 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return _safe_tool_call(
             lambda: _calendar_update_request_reply(query, conversation_id=conversation_id, location=""),
             "I couldn't prepare that calendar location update.",
+            active_domain="calendar",
         )
 
     notes_match = _CALENDAR_NOTES_RE.search(message)
@@ -279,6 +309,7 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return _safe_tool_call(
             lambda: _calendar_update_request_reply(query, conversation_id=conversation_id, description=description),
             "I couldn't prepare that calendar notes update.",
+            active_domain="calendar",
         )
 
     clear_notes_match = _CALENDAR_CLEAR_NOTES_RE.search(message)
@@ -287,6 +318,7 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return _safe_tool_call(
             lambda: _calendar_update_request_reply(query, conversation_id=conversation_id, description=""),
             "I couldn't prepare that calendar notes update.",
+            active_domain="calendar",
         )
 
     delete_match = _CALENDAR_DELETE_RE.search(message)
@@ -295,6 +327,7 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return _safe_tool_call(
             lambda: _calendar_delete_request_reply(query, conversation_id=conversation_id),
             "I couldn't prepare that calendar deletion.",
+            active_domain="calendar",
         )
 
     move_match = _CALENDAR_MOVE_RE.search(message)
@@ -304,38 +337,39 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
         return _safe_tool_call(
             lambda: _calendar_move_request_reply(query, when_text, conversation_id=conversation_id),
             "I couldn't prepare that calendar update.",
+            active_domain="calendar",
         )
 
     if _CALENDAR_LOOKUP_RE.search(message):
-        return _safe_tool_call(lambda: _calendar_lookup_reply(message), "I couldn't check your calendar just now.")
+        return _safe_tool_call(lambda: _calendar_lookup_reply(message), "I couldn't check your calendar just now.", active_domain="calendar")
 
     weather_match = _WEATHER_RE.search(message)
     if weather_match:
         location = _clean_query(weather_match.group("location"))
-        return _safe_tool_call(lambda: _weather_reply(location), "I couldn't check the weather just now.")
+        return _safe_tool_call(lambda: _weather_reply(location), "I couldn't check the weather just now.", active_domain="weather")
 
     google_match = _GOOGLE_RE.search(message)
     if google_match:
         query = _clean_query(google_match.group("query"))
-        return _safe_tool_call(lambda: _google_search_reply(query, natural=True), "I couldn't search the web just now.")
+        return _safe_tool_call(lambda: _google_search_reply(query, natural=True), "I couldn't search the web just now.", active_domain="research")
 
     web_match = _WEB_SEARCH_RE.search(message)
     if web_match:
         query = _clean_query(web_match.group("query"))
-        return _safe_tool_call(lambda: _web_search_reply(query), "I couldn't search the web just now.")
+        return _safe_tool_call(lambda: _web_search_reply(query), "I couldn't search the web just now.", active_domain="research")
 
     repo_match = _REPO_SEARCH_RE.search(message)
     if repo_match:
         query = _clean_query(repo_match.group("query"))
-        return _safe_tool_call(lambda: _repo_search_reply(query), "I couldn't search the workspace.")
+        return _safe_tool_call(lambda: _repo_search_reply(query), "I couldn't search the workspace.", active_domain="workspace")
 
     lower = message.lower()
     if lower.startswith("search the repo for ") or lower.startswith("search the codebase for ") or lower.startswith("search the workspace for "):
         query = _clean_query(message.split(" for ", 1)[1])
-        return _safe_tool_call(lambda: _repo_search_reply(query), "I couldn't search the workspace.")
+        return _safe_tool_call(lambda: _repo_search_reply(query), "I couldn't search the workspace.", active_domain="workspace")
     if lower.startswith("find ") and (" in the repo" in lower or " in the codebase" in lower or " in the workspace" in lower):
         query = _clean_query(re.split(r"\s+in\s+the\s+(?:repo|codebase|workspace)$", message, maxsplit=1, flags=re.IGNORECASE)[0][5:])
-        return _safe_tool_call(lambda: _repo_search_reply(query), "I couldn't search the workspace.")
+        return _safe_tool_call(lambda: _repo_search_reply(query), "I couldn't search the workspace.", active_domain="workspace")
 
     read_match = _READ_FILE_RE.search(message)
     if read_match:
@@ -346,15 +380,16 @@ def maybe_handle_natural_language_tool_request(text: str, *, conversation_id: in
                 int(read_match.group("end")) if read_match.group("end") else None,
             ),
             "I couldn't read that file.",
+            active_domain="workspace",
         )
 
     list_match = _LIST_DIR_RE.search(message)
     if list_match:
-        return _safe_tool_call(lambda: _list_reply(list_match.group("path")), "I couldn't list that directory.")
+        return _safe_tool_call(lambda: _list_reply(list_match.group("path")), "I couldn't list that directory.", active_domain="workspace")
 
     run_match = _RUN_RE.search(message)
     if run_match:
-        return _safe_tool_call(lambda: _run_reply(run_match.group("command")), "I couldn't run that command.")
+        return _safe_tool_call(lambda: _run_reply(run_match.group("command")), "I couldn't run that command.", active_domain="workspace")
 
     return ToolChatResponse(handled=False)
 
@@ -378,6 +413,7 @@ def _maybe_handle_pending_confirmation(text: str, *, conversation_id: int | None
         return ToolChatResponse(
             handled=True,
             reply=f"Deleted `{deleted.title}` from your calendar. It was scheduled for `{deleted.starts_at}`.",
+            active_domain="calendar",
         )
 
     if pending.action == "calendar_reschedule":
@@ -391,6 +427,7 @@ def _maybe_handle_pending_confirmation(text: str, *, conversation_id: int | None
         return ToolChatResponse(
             handled=True,
             reply=f"Rescheduled `{updated.title}`. It is now set for `{updated.starts_at}`.",
+            active_domain="calendar",
         )
 
     if pending.action == "calendar_update_fields":
@@ -403,6 +440,7 @@ def _maybe_handle_pending_confirmation(text: str, *, conversation_id: int | None
         return ToolChatResponse(
             handled=True,
             reply=_calendar_field_update_success_reply(updated, pending),
+            active_domain="calendar",
         )
 
     return ToolChatResponse(handled=False)
@@ -420,14 +458,53 @@ def _help_reply() -> str:
     )
 
 
-def _safe_tool_call(fn: Callable[[], str], fallback: str) -> ToolChatResponse:
+def _finalize_tool_response(response: ToolChatResponse, *, conversation_id: int | None) -> ToolChatResponse:
+    if response.handled and response.active_domain:
+        remember_active_follow_up_domain(conversation_id, response.active_domain)
+    return response
+
+
+def _safe_tool_call(fn: Callable[[], str], fallback: str, *, active_domain: str | None = None) -> ToolChatResponse:
     try:
-        return ToolChatResponse(handled=True, reply=fn())
+        return ToolChatResponse(handled=True, reply=fn(), active_domain=active_domain)
     except Exception as exc:
         detail = str(exc).strip()
         if detail:
-            return ToolChatResponse(handled=True, reply=f"{fallback} {detail}")
-        return ToolChatResponse(handled=True, reply=fallback)
+            return ToolChatResponse(handled=True, reply=f"{fallback} {detail}", active_domain=active_domain)
+        return ToolChatResponse(handled=True, reply=fallback, active_domain=active_domain)
+
+
+def _maybe_active_follow_up_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
+    active_domain = get_active_follow_up_domain(conversation_id)
+    if active_domain is None:
+        return None
+    if not looks_like_ambiguous_follow_up(text):
+        return None
+    if has_conflicting_domain_cues(text, active_domain=active_domain):
+        return None
+    return _dispatch_active_follow_up(active_domain, text, conversation_id=conversation_id)
+
+
+def _dispatch_active_follow_up(active_domain: str, text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
+    if active_domain == "weather":
+        return _maybe_weather_tool_response(text, conversation_id=conversation_id)
+    if active_domain == "brief":
+        reply = maybe_handle_brief_request(text, conversation_id=conversation_id)
+        if reply is None:
+            return None
+        return ToolChatResponse(handled=True, reply=reply, active_domain="brief")
+    if active_domain == "reminder":
+        reply = maybe_handle_reminder_request(text, conversation_id=conversation_id)
+        if reply is None:
+            return None
+        return ToolChatResponse(handled=True, reply=reply, active_domain="reminder")
+    if active_domain == "calendar":
+        return _maybe_calendar_tool_response(text, conversation_id=conversation_id)
+    if active_domain == "workspace":
+        return _maybe_workspace_tool_response(text, conversation_id=conversation_id)
+    if active_domain == "research":
+        return _maybe_research_tool_response(text, conversation_id=conversation_id)
+    return None
 
 
 def _safe_weather_tool_response(rest: str, *, conversation_id: int | None) -> ToolChatResponse:
@@ -440,12 +517,14 @@ def _safe_weather_tool_response(rest: str, *, conversation_id: int | None) -> To
             reply=response.reply,
             tool_kind="weather" if response.payload else None,
             tool_payload=response.payload or None,
+            active_domain="weather",
         )
     except Exception as exc:
         detail = str(exc).strip()
         return ToolChatResponse(
             handled=True,
             reply=f"I couldn't check the weather just now. {detail}".strip(),
+            active_domain="weather",
         )
 
 
@@ -465,6 +544,7 @@ def _maybe_weather_tool_response(text: str, *, conversation_id: int | None) -> T
         reply=response.reply,
         tool_kind="weather" if response.payload else None,
         tool_payload=response.payload or None,
+        active_domain="weather",
     )
 
 
@@ -476,12 +556,14 @@ def _maybe_calendar_tool_response(text: str, *, conversation_id: int | None) -> 
         return ToolChatResponse(
             handled=True,
             reply=_execute_calendar_plan(plan, raw_message=text, conversation_id=conversation_id),
+            active_domain="calendar",
         )
     except Exception as exc:
         detail = str(exc).strip()
         return ToolChatResponse(
             handled=True,
             reply=f"I couldn't work with your calendar just now. {detail}".strip(),
+            active_domain="calendar",
         )
 
 
@@ -493,12 +575,33 @@ def _maybe_workspace_tool_response(text: str, *, conversation_id: int | None) ->
         return ToolChatResponse(
             handled=True,
             reply=_execute_workspace_plan(plan, conversation_id=conversation_id),
+            active_domain="workspace",
         )
     except Exception as exc:
         detail = str(exc).strip()
         return ToolChatResponse(
             handled=True,
             reply=f"I couldn't work with the local workspace just now. {detail}".strip(),
+            active_domain="workspace",
+        )
+
+
+def _maybe_research_tool_response(text: str, *, conversation_id: int | None) -> ToolChatResponse | None:
+    plan = maybe_plan_research_request(text, conversation_id=conversation_id)
+    if plan is None or plan.action == "unknown":
+        return None
+    try:
+        return ToolChatResponse(
+            handled=True,
+            reply=_execute_research_plan(plan, conversation_id=conversation_id),
+            active_domain="research",
+        )
+    except Exception as exc:
+        detail = str(exc).strip()
+        return ToolChatResponse(
+            handled=True,
+            reply=f"I couldn't search the web just now. {detail}".strip(),
+            active_domain="research",
         )
 
 
@@ -594,6 +697,22 @@ def _execute_workspace_plan(plan, *, conversation_id: int | None) -> str:
         return reply
 
     raise ValueError(f"Unsupported workspace action `{action}`.")
+
+
+def _execute_research_plan(plan, *, conversation_id: int | None) -> str:
+    action = str(plan.action or "").strip().lower()
+    query = _clean_query(plan.query or "")
+    if not query:
+        raise ValueError("Tell me what you want me to research.")
+
+    if action == "google_search":
+        reply = _google_search_reply(query, natural=True)
+        remember_research_context(conversation_id, action="google_search", query=query)
+        return reply
+
+    reply = _web_search_reply(query)
+    remember_research_context(conversation_id, action="web_search", query=query)
+    return reply
 
 
 def _calendar_command_reply(rest: str, *, conversation_id: int | None) -> str:

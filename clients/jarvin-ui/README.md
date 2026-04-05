@@ -2,30 +2,33 @@
 
 This is the shared React frontend for Jarvin.
 
-It currently powers the Tauri desktop client, and it is intentionally built as an HTTP-first shell over the Python host so the same frontend architecture can be reused for Tauri mobile and a VPN-accessed phone browser shell.
+It currently powers:
 
-## Current Scope
+- the Tauri desktop app
+- the host-served `/app/` shell
+- the Tauri Android shell
 
-- desktop-only testing for now
-- typed chat workspace
-- first-pass remote client microphone capture
-- conversation switching and management
-- model/backend settings
-- device and listener controls
-- profile editing
-- diagnostics view
+The Python host remains the source of truth for models, GPU inference, persistence, and tool execution.
 
-The host machine still runs the actual Jarvin backend, models, and GPU workload.
+## What The Client Does Today
 
-## Run It
+- typed chat with multi-conversation history
+- remote microphone capture
+- spoken reply playback on the phone
+- model/backend selection
+- listener and device controls
+- profile and diagnostics surfaces
+- weather cards and other richer tool responses
 
-From the repo root, start the host first:
+## Run The Desktop Client
+
+Start the host first:
 
 ```powershell
 python server.py
 ```
 
-Then in a second terminal:
+Then in another terminal:
 
 ```powershell
 cd clients\jarvin-ui
@@ -33,9 +36,9 @@ npm install
 npm run tauri dev
 ```
 
-## Build The Host-Served Mobile Shell
+## Build The Host-Served Shell
 
-To serve the same UI from the Python host at `/app/` for phone or VPN testing:
+To serve the same UI from the Python host at `/app/`:
 
 ```powershell
 cd clients\jarvin-ui
@@ -48,39 +51,33 @@ Then open:
 http://your-host-or-wireguard-ip:8000/app/
 ```
 
-## Build Check
+## Build Checks
 
 ```powershell
 cd clients\jarvin-ui
-npm run tauri build -- --debug --no-bundle
+npm run build
 npm run build:host
+npm run tauri build -- --debug --no-bundle
 ```
 
-## Host URL
+## Host URL Behavior
 
-By default the desktop shell talks to:
+Desktop default:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-The host-served `/app/` shell uses the same origin automatically, so it works cleanly over a WireGuard IP without extra env vars.
-
-Voice note:
-
-- Host listener and input-device controls refer to microphones attached to the Jarvin host machine.
-- Remote microphone capture is a separate client-side path and typically requires HTTPS or a Tauri mobile shell.
-
-To point the desktop shell somewhere else:
+Override it for the desktop shell:
 
 ```powershell
 $env:VITE_JARVIN_API_BASE_URL = "http://your-host:8000"
 npm run tauri dev
 ```
 
-## Android / Tauri Mobile
+The host-served `/app/` shell uses the same origin automatically.
 
-The same frontend is now prepared for a Tauri Android shell, and this machine can now generate an `arm64` debug APK for a Pixel 8 Pro style device.
+## Android / Tauri Mobile
 
 Available commands:
 
@@ -92,26 +89,7 @@ npm run tauri:android:build
 npm run tauri:android:pixel:debug
 ```
 
-Before those commands can work, the machine needs:
-
-- Android Studio or the Android command-line SDK tools
-- Android SDK + NDK
-- `ANDROID_HOME`
-- `ANDROID_SDK_ROOT`
-- `NDK_HOME`
-- `JAVA_HOME`
-
-This repo now includes [tauri.android.conf.json](d:/Projects/Jarvin/clients/jarvin-ui/src-tauri/tauri.android.conf.json) so Android can use a mobile-specific app name and identifier while still reusing the same frontend.
-
-Important:
-
-- The mobile client should usually point at your Jarvin host over WireGuard using the in-app host URL setting.
-- Remote microphone capture should use the phone microphone, not the host PC, once the app is running in the Tauri mobile shell.
-- The helper script adds the required Android audio permissions for the generated mobile project before building.
-
-### Pixel 8 Pro Debug Build
-
-Use the helper when you want a repeatable `arm64` debug APK without remembering the full workaround sequence:
+The helper build is the most reliable path on this machine:
 
 ```powershell
 cd clients\jarvin-ui
@@ -121,25 +99,32 @@ npm run tauri:android:pixel:debug
 It will:
 
 - ensure the Android project exists
-- ensure the `aarch64-linux-android` Rust target exists
 - build the shared frontend
-- try the normal Tauri Android build first
-- fall back to direct Gradle packaging on Windows if Developer Mode is off and the symlink step is blocked
+- target `aarch64` / `arm64`
+- fall back to direct Gradle packaging when Windows Developer Mode is off
 
-The generated APK lands at:
+Primary APK artifact:
+
+```text
+clients/jarvin-ui/artifacts/jarvin-mobile-arm64-debug.apk
+```
+
+Generated Gradle output:
 
 ```text
 clients/jarvin-ui/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
 ```
 
-When the app opens on the phone:
+## Android App Flow
 
-1. Connect the phone to WireGuard.
-2. Open `Settings` in the Jarvin mobile shell.
-3. Set `Host URL` to your Jarvin host, for example `http://10.x.x.x:8000`.
-4. Save the host and reconnect.
+1. Install the APK on the phone
+2. Connect the phone to WireGuard if you are remote
+3. Open the Jarvin app
+4. Set `Host URL` in Settings
+5. Use typed chat or the mobile mic button
 
-Note:
+## Voice Notes
 
-- The debug build allows cleartext HTTP so you can talk to the host over WireGuard without setting up HTTPS first.
-- A normal `npm run tauri:android:build` still hits a Windows symlink permission issue on this machine when Developer Mode is off, so the helper script handles that fallback automatically.
+- Host listener controls refer to microphones attached to the Jarvin PC
+- Remote microphone capture is a separate client-side path
+- The Tauri Android shell is the preferred phone voice path because it avoids browser secure-context limitations on plain HTTP

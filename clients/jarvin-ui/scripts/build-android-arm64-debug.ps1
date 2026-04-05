@@ -78,6 +78,7 @@ try {
   Assert-Path $manifestPath "Android manifest"
   Ensure-ManifestPermission -ManifestPath $manifestPath -PermissionName "android.permission.RECORD_AUDIO"
   Ensure-ManifestPermission -ManifestPath $manifestPath -PermissionName "android.permission.MODIFY_AUDIO_SETTINGS"
+  Ensure-ManifestPermission -ManifestPath $manifestPath -PermissionName "android.permission.POST_NOTIFICATIONS"
 
   Invoke-CheckedCommand { rustup target add aarch64-linux-android } "Failed to install the aarch64 Android Rust target."
   & npm run tauri:android:build -- --debug --target aarch64

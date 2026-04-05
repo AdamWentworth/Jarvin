@@ -8,6 +8,7 @@ import {
   type InspectorSection,
 } from "../lib/ui";
 import { stageLabel, type ConnectionState, type RemoteVoiceDiagnostics } from "../lib/runtime";
+import type { ReminderNotificationPermission } from "../lib/notifications";
 
 type SettingsOverlayProps = {
   isOpen: boolean;
@@ -61,6 +62,17 @@ type SettingsOverlayProps = {
   isClientOnline: boolean;
   health: HealthResponse | null;
   remoteVoiceDiagnostics: RemoteVoiceDiagnostics;
+  notificationsSupported: boolean;
+  notificationsEnabled: boolean;
+  notificationPermission: ReminderNotificationPermission;
+  notificationStatus: string;
+  notificationSyncing: boolean;
+  scheduledReminderCount: number;
+  lastNotificationSyncLabel: string;
+  onSetNotificationsEnabled: (value: boolean) => void;
+  onRequestNotificationsPermission: () => void;
+  onSyncNotifications: () => void;
+  onSendTestNotification: () => void;
   profile: UserProfilePayload;
   onProfileChange: (updater: (current: UserProfilePayload) => UserProfilePayload) => void;
   onSaveProfile: (event: FormEvent<HTMLFormElement>) => void;
@@ -120,6 +132,17 @@ export function SettingsOverlay({
   isClientOnline,
   health,
   remoteVoiceDiagnostics,
+  notificationsSupported,
+  notificationsEnabled,
+  notificationPermission,
+  notificationStatus,
+  notificationSyncing,
+  scheduledReminderCount,
+  lastNotificationSyncLabel,
+  onSetNotificationsEnabled,
+  onRequestNotificationsPermission,
+  onSyncNotifications,
+  onSendTestNotification,
   profile,
   onProfileChange,
   onSaveProfile,
@@ -128,6 +151,19 @@ export function SettingsOverlay({
 }: SettingsOverlayProps) {
   if (!isOpen) {
     return null;
+  }
+
+  function notificationPermissionLabel(permission: ReminderNotificationPermission): string {
+    if (permission === "unsupported") {
+      return "Unsupported";
+    }
+    if (permission === "granted") {
+      return "Granted";
+    }
+    if (permission === "denied") {
+      return "Denied";
+    }
+    return "Not requested";
   }
 
   const modelChoices =
@@ -476,6 +512,82 @@ export function SettingsOverlay({
               </form>
 
               <p className="section-status">{profileStatus || "Saved profile preferences will live on the host."}</p>
+            </section>
+          ) : null}
+
+          {activeInspectorSection === "notifications" ? (
+            <section className="inspector-panel-body">
+              <div className="section-copy">
+                <h3>Phone notifications</h3>
+                <p>Jarvin can mirror pending reminders into native system notifications on installed Tauri clients such as your Pixel.</p>
+              </div>
+
+              <section className="nested-panel">
+                <div className="overview-grid diagnostic-grid">
+                  <div className="overview-stat">
+                    <span>Notification support</span>
+                    <strong>{notificationsSupported ? "Installed Tauri app" : "Browser client only"}</strong>
+                  </div>
+                  <div className="overview-stat">
+                    <span>Permission</span>
+                    <strong>{notificationPermissionLabel(notificationPermission)}</strong>
+                  </div>
+                  <div className="overview-stat">
+                    <span>Reminder sync</span>
+                    <strong>{notificationsEnabled ? "Enabled" : "Disabled"}</strong>
+                  </div>
+                  <div className="overview-stat">
+                    <span>Scheduled reminders</span>
+                    <strong>{scheduledReminderCount}</strong>
+                  </div>
+                  <div className="overview-stat">
+                    <span>Last sync</span>
+                    <strong>{lastNotificationSyncLabel}</strong>
+                  </div>
+                </div>
+
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className={notificationsEnabled ? "primary-button" : "ghost-button"}
+                    onClick={() => onSetNotificationsEnabled(!notificationsEnabled)}
+                    disabled={!notificationsSupported}
+                  >
+                    {notificationsEnabled ? "Disable reminder notifications" : "Enable reminder notifications"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={onRequestNotificationsPermission}
+                    disabled={!notificationsSupported}
+                  >
+                    Allow notifications
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={onSyncNotifications}
+                    disabled={!notificationsSupported || notificationSyncing}
+                  >
+                    {notificationSyncing ? "Syncing..." : "Sync reminder notifications"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={onSendTestNotification}
+                    disabled={!notificationsSupported}
+                  >
+                    Send test notification
+                  </button>
+                </div>
+
+                <p className="section-status">
+                  {notificationStatus ||
+                    (notificationsSupported
+                      ? "Reminder notifications can be scheduled locally on this device once permission is granted."
+                      : "System notifications require the installed Jarvin Tauri app on this device.")}
+                </p>
+              </section>
             </section>
           ) : null}
 
