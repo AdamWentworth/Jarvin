@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import backend.agent.workspace_tools as workspace_tools
+import backend.agent.workspace.workspace_request_tools as workspace_tools
 
 
 def test_workspace_planner_handles_fuzzy_repo_search():
@@ -58,3 +58,4 @@ def test_workspace_planner_uses_context_for_show_more():
         assert plan.start_line == 41
     finally:
         workspace_tools.clear_workspace_context(304)
+

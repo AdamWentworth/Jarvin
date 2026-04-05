@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from backend.agent import tools
+import backend.agent.host_tool_runtime as host_tool_runtime
 from backend.api.schemas import (
     AgentCommandRequest,
     AgentCommandResponse,
@@ -20,12 +20,13 @@ from backend.api.schemas import (
 )
 
 router = APIRouter(tags=["agent-tools"])
+tools = host_tool_runtime
 
 
 @router.get("/agent/tools", response_model=AgentToolsManifestResponse | ErrorResponse)
 async def agent_tools_manifest() -> AgentToolsManifestResponse | ErrorResponse:
     try:
-        return AgentToolsManifestResponse(**tools.manifest())
+        return AgentToolsManifestResponse(**host_tool_runtime.manifest())
     except Exception as exc:
         return ErrorResponse(error=str(exc))
 
@@ -33,7 +34,7 @@ async def agent_tools_manifest() -> AgentToolsManifestResponse | ErrorResponse:
 @router.post("/agent/tools/list", response_model=AgentListResponse | ErrorResponse)
 async def agent_tools_list(payload: AgentListRequest) -> AgentListResponse | ErrorResponse:
     try:
-        entries = tools.list_directory(payload.path, max_entries=payload.max_entries or 200)
+        entries = host_tool_runtime.list_directory(payload.path, max_entries=payload.max_entries or 200)
         return AgentListResponse(path=payload.path, entries=entries)
     except Exception as exc:
         return ErrorResponse(error=str(exc))
@@ -42,7 +43,7 @@ async def agent_tools_list(payload: AgentListRequest) -> AgentListResponse | Err
 @router.post("/agent/tools/search", response_model=AgentSearchResponse | ErrorResponse)
 async def agent_tools_search(payload: AgentSearchRequest) -> AgentSearchResponse | ErrorResponse:
     try:
-        result = tools.search_workspace(
+        result = host_tool_runtime.search_workspace(
             payload.query,
             path=payload.path,
             glob=payload.glob,
@@ -60,7 +61,7 @@ async def agent_tools_search(payload: AgentSearchRequest) -> AgentSearchResponse
 @router.post("/agent/tools/read", response_model=AgentReadResponse | ErrorResponse)
 async def agent_tools_read(payload: AgentReadRequest) -> AgentReadResponse | ErrorResponse:
     try:
-        result = tools.read_file(payload.path, start_line=payload.start_line, end_line=payload.end_line)
+        result = host_tool_runtime.read_file(payload.path, start_line=payload.start_line, end_line=payload.end_line)
         return AgentReadResponse(
             path=result.path,
             start_line=result.start_line,
@@ -75,7 +76,7 @@ async def agent_tools_read(payload: AgentReadRequest) -> AgentReadResponse | Err
 @router.post("/agent/tools/write", response_model=AgentWriteResponse | ErrorResponse)
 async def agent_tools_write(payload: AgentWriteRequest) -> AgentWriteResponse | ErrorResponse:
     try:
-        result = tools.write_file(payload.path, payload.content, append=payload.append)
+        result = host_tool_runtime.write_file(payload.path, payload.content, append=payload.append)
         return AgentWriteResponse(path=result.path, bytes_written=result.bytes_written, append=result.append)
     except Exception as exc:
         return ErrorResponse(error=str(exc))
@@ -84,7 +85,7 @@ async def agent_tools_write(payload: AgentWriteRequest) -> AgentWriteResponse | 
 @router.post("/agent/tools/run", response_model=AgentCommandResponse | ErrorResponse)
 async def agent_tools_run(payload: AgentCommandRequest) -> AgentCommandResponse | ErrorResponse:
     try:
-        result = tools.run_safe_command(payload.command)
+        result = host_tool_runtime.run_safe_command(payload.command)
         return AgentCommandResponse(
             command=result.command,
             returncode=result.returncode,

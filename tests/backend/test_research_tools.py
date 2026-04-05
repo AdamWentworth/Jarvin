@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import backend.agent.research_tools as research_tools
+import backend.agent.research.research_request_tools as research_tools
 
 
 def test_research_planner_handles_natural_research_phrase():
@@ -34,3 +34,4 @@ def test_research_planner_preserves_google_request():
     assert plan.is_research_request is True
     assert plan.action == "google_search"
     assert plan.query == "qwen2.5 3b gguf"
+

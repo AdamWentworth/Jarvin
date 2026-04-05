@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import backend.agent.brief_planner as brief_planner
+import backend.agent.briefing.brief_request_planner as brief_planner
 
 
 def test_brief_planner_handles_rundown_phrase():
@@ -26,3 +26,4 @@ def test_brief_planner_uses_context_for_tomorrow_follow_up():
         assert plan.location_hint == "Burnaby"
     finally:
         brief_planner.clear_brief_context(502)
+

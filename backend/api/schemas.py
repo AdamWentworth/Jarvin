@@ -34,6 +34,7 @@ class SimpleMessage(_StrictModel):
 class ChatRequest(_StrictModel):
     user_text: str
     conversation_id: int | None = None
+    agent_access_mode: str | None = None
     mode: str | None = None
     context: str | None = None
     system_instructions: str | None = None

@@ -1,4 +1,5 @@
 export type ChatMode = "voice_fast" | "chat_balanced" | "agent_strong";
+export type AgentAccessMode = "read_only" | "approve_risky" | "full_access";
 
 export interface WeatherToolPayload {
   location_query: string;
@@ -28,6 +29,17 @@ export interface UserProfilePayload {
   response_length: string;
 }
 
+export interface ApprovalRequestToolPayload {
+  status: string;
+  action_kind: string;
+  title: string;
+  summary: string;
+  risk_level: string;
+  details: string[];
+  access_mode: AgentAccessMode | string;
+  can_approve: boolean;
+}
+
 export interface ConversationSummary {
   id: number;
   title: string;
@@ -40,7 +52,7 @@ export interface ConversationTurn {
   role: "user" | "assistant" | string;
   message: string;
   tool_kind?: string | null;
-  tool_payload?: WeatherToolPayload | Record<string, unknown> | null;
+  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | Record<string, unknown> | null;
 }
 
 export interface WorkspaceBootstrapResponse {
@@ -62,7 +74,7 @@ export interface ChatResponse {
   conversation_id: number | null;
   tts_url?: string | null;
   tool_kind?: string | null;
-  tool_payload?: WeatherToolPayload | Record<string, unknown> | null;
+  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | Record<string, unknown> | null;
 }
 
 export interface TranscribeResponse {

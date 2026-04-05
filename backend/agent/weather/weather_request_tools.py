@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import config as cfg
-from backend.agent.external_tools import WeatherResult, get_weather
+from backend.agent.integration_facade import WeatherResult, get_weather
 from backend.ai_engine import build_jarvin_config, generate_reply
 
 _WEATHER_KEYWORDS = (
@@ -295,3 +295,4 @@ def _parse_json_object(text: str) -> dict[str, object]:
 
 def _clean_text(value: object) -> str:
     return str(value or "").strip().rstrip("?.!,")
+

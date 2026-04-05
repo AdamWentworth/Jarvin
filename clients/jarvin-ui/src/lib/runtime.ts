@@ -1,6 +1,7 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import { transcribeAudioBlob } from "./api";
+import type { AgentAccessMode } from "./types";
 
 export type RemoteVoiceCapability = {
   available: boolean;
@@ -33,6 +34,7 @@ export const DEFAULT_REMOTE_VOICE_DIAGNOSTICS: RemoteVoiceDiagnostics = {
 
 const SPEAK_REPLIES_STORAGE_KEY = "jarvin.speakRepliesOnDevice";
 const CHAT_DRAFT_STORAGE_PREFIX = "jarvin.chatDraft.";
+const AGENT_ACCESS_MODE_STORAGE_KEY = "jarvin.agentAccessMode";
 
 export function detectRemoteVoiceCapability(): RemoteVoiceCapability {
   if (typeof window === "undefined") {
@@ -77,6 +79,24 @@ export function setStoredSpeakRepliesPreference(value: boolean) {
   if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
     window.localStorage.setItem(SPEAK_REPLIES_STORAGE_KEY, String(value));
   }
+}
+
+export function getStoredAgentAccessMode(): AgentAccessMode {
+  if (!canUseWindowStorage()) {
+    return "approve_risky";
+  }
+  const raw = window.localStorage.getItem(AGENT_ACCESS_MODE_STORAGE_KEY);
+  if (raw === "read_only" || raw === "approve_risky" || raw === "full_access") {
+    return raw;
+  }
+  return "approve_risky";
+}
+
+export function setStoredAgentAccessMode(value: AgentAccessMode) {
+  if (!canUseWindowStorage()) {
+    return;
+  }
+  window.localStorage.setItem(AGENT_ACCESS_MODE_STORAGE_KEY, value);
 }
 
 function canUseWindowStorage(): boolean {

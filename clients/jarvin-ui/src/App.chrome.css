@@ -13,7 +13,14 @@
 .inspector-tabs {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.inspector-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .inspector-panel-body {
@@ -74,6 +81,12 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.settings-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .settings-dialog-header h2 {
   margin: 4px 0 6px;
   font-size: 1.35rem;
@@ -91,11 +104,34 @@
 }
 
 .settings-dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  flex: 1;
+  min-height: 0;
   padding: 18px 22px 22px;
   overflow: auto;
+}
+
+.settings-summary-strip {
+  padding: 0 22px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+.summary-stat {
+  min-height: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+}
+
+.settings-tabs-shell {
+  flex: 0 0 auto;
+  padding: 12px 22px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(17, 19, 24, 0.98);
 }
 
 .section-copy {
@@ -126,6 +162,21 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.settings-split-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.nested-subpanel {
+  padding: 12px;
+  border-radius: 16px;
+}
+
+.settings-primary-actions {
+  align-items: flex-start;
 }
 
 .primary-button,
@@ -173,7 +224,8 @@
 }
 
 .tab-button {
-  flex: 1 1 120px;
+  flex: 0 0 auto;
+  min-width: 112px;
 }
 
 .tab-button.active {
@@ -265,7 +317,9 @@
 
   .profile-grid,
   .diagnostic-grid,
-  .overview-grid {
+  .overview-grid,
+  .settings-summary-grid,
+  .settings-split-grid {
     grid-template-columns: 1fr;
   }
 
@@ -412,7 +466,20 @@
     padding: 16px;
   }
 
+  .settings-summary-strip {
+    padding: 0 16px 14px;
+  }
+
+  .settings-tabs-shell {
+    padding: 12px 16px 10px;
+  }
+
   .settings-dialog-header p {
     max-width: 36ch;
+  }
+
+  .approval-request-header,
+  .approval-request-footer {
+    flex-direction: column;
   }
 }

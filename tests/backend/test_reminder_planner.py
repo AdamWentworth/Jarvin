@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import backend.agent.reminder_planner as reminder_planner
+import backend.agent.reminders.reminder_request_planner as reminder_planner
 
 
 def test_awaiting_time_follow_up_uses_context():
@@ -52,3 +52,4 @@ def test_llm_plan_can_normalize_fuzzy_reminder(monkeypatch):
     assert plan.action == "create"
     assert plan.title == "call mom"
     assert plan.due_at_iso == "2026-04-04T13:00:00-07:00"
+

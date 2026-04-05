@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     agent_workspace_root: str = "."
     agent_allow_file_writes: bool = True
     agent_allow_command_execution: bool = True
+    agent_default_access_mode: str = "approve_risky"
     agent_command_timeout_sec: float = 20.0
     agent_max_file_read_lines: int = 400
     agent_max_search_results: int = 100
@@ -211,6 +212,13 @@ class Settings(BaseSettings):
         vv = str(v or "").strip().lower()
         allowed = {"duckduckgo_lite", "google_cse"}
         return vv if vv in allowed else "duckduckgo_lite"
+
+    @field_validator("agent_default_access_mode", mode="before")
+    @classmethod
+    def _validate_agent_default_access_mode(cls, v: str | None) -> str:
+        vv = str(v or "").strip().lower()
+        allowed = {"read_only", "approve_risky", "full_access"}
+        return vv if vv in allowed else "approve_risky"
 
     @field_validator("weather_temperature_unit", mode="before")
     @classmethod

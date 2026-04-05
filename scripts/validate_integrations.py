@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import sys
@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config as cfg  # noqa: E402
-from backend.agent.external_tools import (  # noqa: E402
+from backend.agent.integration_facade import (  # noqa: E402
     browse_search_results,
     google_calendar_credentials_configured,
     google_calendar_token_available,
@@ -151,3 +151,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

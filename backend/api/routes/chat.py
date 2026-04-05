@@ -1,4 +1,4 @@
-# backend/api/routes/chat.py
+﻿# backend/api/routes/chat.py
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +7,7 @@ import os
 from fastapi import APIRouter
 
 from backend.api.schemas import ChatRequest, ChatResponse, ErrorResponse
-from backend.agent.chat_tools import maybe_handle_assistant_tool_request
+from backend.agent.chat.assistant_chat_tools import maybe_handle_assistant_tool_request
 from backend.ai_engine import build_context, build_jarvin_config, generate_reply
 from backend.tts.engine import synth_to_wav
 from memory.conversation import (
@@ -33,6 +33,7 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         tool_response = maybe_handle_assistant_tool_request(
             text,
             conversation_id=payload.conversation_id,
+            agent_access_mode=payload.agent_access_mode,
         )
     except Exception as exc:
         log.exception("Tool command failed: %s", exc)
@@ -115,3 +116,4 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
     except Exception as e:
         log.exception("Chat generation failed: %s", e)
         return ErrorResponse(error="chat generation failed")
+

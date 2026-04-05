@@ -1,14 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timedelta
 import re
 
 import config as cfg
-from backend.agent.brief_planner import (
+from backend.agent.briefing.brief_request_planner import (
     maybe_plan_brief_request,
     remember_brief_context,
 )
-from backend.agent.external_tools import (
+from backend.agent.integration_facade import (
     get_calendar_agenda,
     get_weather,
     google_calendar_credentials_configured,
@@ -199,3 +199,4 @@ def _brief_heading(now: datetime, day_offset: int) -> str:
 
 def _clean_text(value: str) -> str:
     return str(value or "").strip().rstrip("?.!,")
+

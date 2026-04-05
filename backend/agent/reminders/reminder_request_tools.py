@@ -1,14 +1,20 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, timedelta
 import re
 
-from backend.agent.reminder_planner import (
+from backend.agent.reminders.reminder_request_planner import (
     clear_reminder_context,
     get_reminder_context,
     maybe_plan_reminder_request,
     remember_reminder_context,
+)
+from backend.agent.reminders.reminder_datetime_utils import (
+    display_due,
+    parse_iso,
+    parse_due_text,
+    parse_recurring_schedule,
 )
 from memory.reminders import (
     advance_due_at,
@@ -18,20 +24,8 @@ from memory.reminders import (
     find_reminders,
     list_due_reminders,
     list_reminders,
-    normalize_recurrence,
     update_reminder,
 )
-
-DEFAULT_REMINDER_TIME = time(hour=9, minute=0)
-WEEKDAYS = {
-    "monday": 0,
-    "tuesday": 1,
-    "wednesday": 2,
-    "thursday": 3,
-    "friday": 4,
-    "saturday": 5,
-    "sunday": 6,
-}
 
 _REMIND_ME_RE = re.compile(
     r"^(?:please\s+)?(?:remind me to|add (?:a )?reminder to|set (?:a )?reminder to)\s+(?P<body>.+)$",
@@ -135,7 +129,7 @@ def maybe_handle_reminder_request(text: str, *, conversation_id: int | None = No
             if created["recurrence"] != "once"
             else ""
         )
-        return f"Saved reminder `{created['title']}` for `{_display_due(created['due_at'])}`.{recurrence_note}"
+        return f"Saved reminder `{created['title']}` for `{display_due(created['due_at'])}`.{recurrence_note}"
     except ValueError as exc:
         return str(exc)
 
@@ -180,7 +174,7 @@ def handle_reminder_command(rest: str) -> str:
         if draft is None:
             raise ValueError("Use `/tool reminder add <task> tomorrow at 9am` or `/tool reminder add every weekday at 8am remind me to stretch`.")
         created = create_reminder(draft.title, due_at=draft.due_at, recurrence=draft.recurrence)
-        return f"Saved reminder `{created['title']}` for `{_display_due(created['due_at'])}`."
+        return f"Saved reminder `{created['title']}` for `{display_due(created['due_at'])}`."
     if lower.startswith("done "):
         return _complete_reply(body[5:].strip())
     if lower.startswith("delete "):
@@ -199,7 +193,7 @@ def _parse_reminder_draft(message: str) -> ReminderDraft | None:
         schedule = recurring_prefix.group("schedule")
         time_hint = recurring_prefix.group("time")
         title = _clean_text(recurring_prefix.group("title"))
-        recurrence, due_at = _parse_recurring_schedule(schedule, time_hint=time_hint)
+        recurrence, due_at = parse_recurring_schedule(schedule, time_hint=time_hint)
         return ReminderDraft(title=title, due_at=due_at, recurrence=recurrence)
 
     remind_match = _REMIND_ME_RE.match(message)
@@ -210,7 +204,7 @@ def _parse_reminder_draft(message: str) -> ReminderDraft | None:
     recurring_suffix = _ROUTINE_SUFFIX_RE.match(body)
     if recurring_suffix:
         title = _clean_text(recurring_suffix.group("title"))
-        recurrence, due_at = _parse_recurring_schedule(
+        recurrence, due_at = parse_recurring_schedule(
             recurring_suffix.group("schedule"),
             time_hint=recurring_suffix.group("time"),
         )
@@ -219,19 +213,19 @@ def _parse_reminder_draft(message: str) -> ReminderDraft | None:
     relative_match = _RELATIVE_RE.search(body)
     if relative_match:
         title = _clean_text(body[: relative_match.start()])
-        due_at = _parse_due_text(relative_match.group(0))
+        due_at = parse_due_text(relative_match.group(0))
         return ReminderDraft(title=title, due_at=due_at, recurrence="once")
 
     trailing_match = _TRAILING_SCHEDULE_RE.match(body)
     if trailing_match:
         title = _clean_text(trailing_match.group("title"))
-        due_at = _parse_due_text(trailing_match.group("when"))
+        due_at = parse_due_text(trailing_match.group("when"))
         return ReminderDraft(title=title, due_at=due_at, recurrence="once")
 
     time_only_match = _TIME_ONLY_RE.match(body)
     if time_only_match:
         title = _clean_text(time_only_match.group("title"))
-        due_at = _parse_due_text(time_only_match.group("when"))
+        due_at = parse_due_text(time_only_match.group("when"))
         return ReminderDraft(title=title, due_at=due_at, recurrence="once")
 
     raise ValueError(
@@ -289,7 +283,7 @@ def _execute_reminder_plan(plan, *, conversation_id: int | None) -> str:
             if created["recurrence"] != "once"
             else ""
         )
-        return f"Saved reminder `{created['title']}` for `{_display_due(created['due_at'])}`.{recurrence_note}"
+        return f"Saved reminder `{created['title']}` for `{display_due(created['due_at'])}`.{recurrence_note}"
     return None
 
 
@@ -305,7 +299,7 @@ def _list_reply(*, routines_only: bool, window: str, conversation_id: int | None
             return "You do not have any active routines yet."
         remember_reminder_context(conversation_id, action="list_routines", last_title=str(reminders[0]["title"]))
         lines = [
-            f"- `{item['title']}` at `{_display_due(item['due_at'])}` (`{item['recurrence']}`)"
+            f"- `{item['title']}` at `{display_due(item['due_at'])}` (`{item['recurrence']}`)"
             for item in reminders[:20]
         ]
         return "Active routines:\n" + "\n".join(lines)
@@ -321,7 +315,7 @@ def _list_reply(*, routines_only: bool, window: str, conversation_id: int | None
         end = (now + timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=0)
         reminders = [
             item for item in list_reminders(status="pending", limit=100)
-            if _parse_iso(item["due_at"]).date() == (now.date() + timedelta(days=1))
+            if parse_iso(item["due_at"]).date() == (now.date() + timedelta(days=1))
         ]
         label = "tomorrow"
     elif window == "week":
@@ -329,7 +323,7 @@ def _list_reply(*, routines_only: bool, window: str, conversation_id: int | None
         upper = now + timedelta(days=7)
         reminders = [
             item for item in list_reminders(status="pending", limit=100)
-            if _parse_iso(item["due_at"]) <= upper
+            if parse_iso(item["due_at"]) <= upper
         ]
         label = "the next 7 days"
     else:
@@ -344,7 +338,7 @@ def _list_reply(*, routines_only: bool, window: str, conversation_id: int | None
     for item in reminders[:20]:
         recurrence = f" ({item['recurrence']})" if item["recurrence"] != "once" else ""
         overdue = " [overdue]" if item["is_overdue"] else ""
-        lines.append(f"- `{_display_due(item['due_at'])}` {item['title']}{recurrence}{overdue}")
+        lines.append(f"- `{display_due(item['due_at'])}` {item['title']}{recurrence}{overdue}")
     return f"Pending reminders for {label}:\n" + "\n".join(lines)
 
 
@@ -357,7 +351,7 @@ def _complete_reply(query: str, *, conversation_id: int | None = None) -> str:
         return f"Marked `{updated['title']}` as done."
     return (
         f"Completed `{updated['title']}` for now. "
-        f"The next `{updated['recurrence']}` reminder is set for `{_display_due(updated['due_at'])}`."
+        f"The next `{updated['recurrence']}` reminder is set for `{display_due(updated['due_at'])}`."
     )
 
 
@@ -372,13 +366,13 @@ def _delete_reply(query: str, *, conversation_id: int | None = None) -> str:
 def _move_reply(query: str, when_text: str, *, conversation_id: int | None = None) -> str:
     matches = find_reminders(query, include_done=False, limit=5)
     reminder = _pick_single_match(matches, query)
-    due_at = _parse_due_text(when_text)
+    due_at = parse_due_text(when_text)
     updated = update_reminder(int(reminder["id"]), due_at=due_at)
     if updated["recurrence"] != "once":
         advanced = advance_due_at(updated["due_at"], updated["recurrence"], now=datetime.now().astimezone() - timedelta(seconds=1))
         updated = update_reminder(int(reminder["id"]), due_at=advanced)
     remember_reminder_context(conversation_id, action="move", last_title=str(updated["title"]))
-    return f"Moved `{updated['title']}` to `{_display_due(updated['due_at'])}`."
+    return f"Moved `{updated['title']}` to `{display_due(updated['due_at'])}`."
 
 
 def _resolve_query_text(query: str | None, *, conversation_id: int | None) -> str:
@@ -416,7 +410,7 @@ def _coerce_plan_due(plan) -> datetime | None:
         return parsed.astimezone()
     when_text = _clean_text(plan.when_text or "")
     if when_text:
-        return _parse_due_text(when_text)
+        return parse_due_text(when_text)
     return None
 
 
@@ -424,169 +418,9 @@ def _pick_single_match(matches: list[dict[str, object]], query: str) -> dict[str
     if not matches:
         raise ValueError(f"I couldn't find a reminder matching '{query}'.")
     if len(matches) > 1:
-        lines = [f"- `{item['title']}` due `{_display_due(str(item['due_at']))}`" for item in matches[:5]]
+        lines = [f"- `{item['title']}` due `{display_due(str(item['due_at']))}`" for item in matches[:5]]
         raise ValueError("I found multiple matching reminders. Please be more specific:\n" + "\n".join(lines))
     return matches[0]
-
-
-def _parse_recurring_schedule(schedule_text: str, *, time_hint: str | None) -> tuple[str, datetime]:
-    raw = _clean_text(schedule_text).lower()
-    now = datetime.now().astimezone()
-    recurrence = "daily"
-    due_date = now.date()
-
-    if "weekday" in raw:
-        recurrence = "weekday"
-        while due_date.weekday() >= 5:
-            due_date += timedelta(days=1)
-    elif raw.startswith("weekly") or raw.startswith("every week"):
-        recurrence = "weekly"
-        for label, weekday in WEEKDAYS.items():
-            if label in raw:
-                due_date = _next_weekday(now.date(), weekday, allow_today=True)
-                break
-    else:
-        recurrence = normalize_recurrence("daily")
-
-    parsed_time = _extract_time(_clean_text(time_hint or "")) if time_hint else DEFAULT_REMINDER_TIME
-    due_at = datetime.combine(due_date, parsed_time, tzinfo=now.tzinfo)
-    if recurrence == "weekday" and due_at.weekday() >= 5:
-        due_at = advance_due_at(due_at, recurrence, now=now)
-    elif due_at <= now:
-        due_at = advance_due_at(due_at, recurrence, now=now)
-    return recurrence, due_at
-
-
-def _parse_due_text(text: str) -> datetime:
-    raw = _clean_text(text)
-    now = datetime.now().astimezone()
-    lower = raw.lower()
-
-    relative_match = _RELATIVE_RE.search(lower)
-    if relative_match:
-        count = int(relative_match.group("count"))
-        unit = relative_match.group("unit").lower()
-        if unit.startswith("minute"):
-            return now + timedelta(minutes=count)
-        if unit.startswith("hour"):
-            return now + timedelta(hours=count)
-        return now + timedelta(days=count)
-
-    parsed_date = _extract_explicit_date(lower) or _extract_relative_date(lower, now.date())
-    parsed_time = _extract_time(lower)
-
-    if parsed_date is None and parsed_time is None:
-        raise ValueError(
-            "I couldn't understand when to schedule that reminder. Try something like `tomorrow at 5pm` or `in 30 minutes`."
-        )
-
-    if parsed_date is None:
-        parsed_date = now.date()
-    if parsed_time is None:
-        parsed_time = _default_time_for_phrase(lower)
-
-    due_at = datetime.combine(parsed_date, parsed_time, tzinfo=now.tzinfo)
-    if due_at <= now and parsed_date == now.date():
-        due_at += timedelta(days=1)
-    return due_at
-
-
-def _extract_explicit_date(text: str) -> date | None:
-    iso_match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", text)
-    if iso_match:
-        year, month, day = map(int, iso_match.groups())
-        return date(year, month, day)
-
-    slash_match = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", text)
-    if slash_match:
-        month = int(slash_match.group(1))
-        day = int(slash_match.group(2))
-        year = int(slash_match.group(3)) if slash_match.group(3) else datetime.now().year
-        if year < 100:
-            year += 2000
-        return date(year, month, day)
-    return None
-
-
-def _extract_relative_date(text: str, base_date: date) -> date | None:
-    today = datetime.now().date()
-    if "today" in text:
-        return today
-    if "tomorrow" in text:
-        return today + timedelta(days=1)
-    if "next week" in text:
-        return base_date + timedelta(days=7)
-    if "tonight" in text or "this evening" in text or "this afternoon" in text or "this morning" in text:
-        return today
-
-    for label, index in WEEKDAYS.items():
-        if label in text:
-            return _next_weekday(base_date, index, allow_today=not f"next {label}" in text)
-    return None
-
-
-def _next_weekday(base_date: date, weekday: int, *, allow_today: bool) -> date:
-    days_ahead = (weekday - base_date.weekday()) % 7
-    if days_ahead == 0 and not allow_today:
-        days_ahead = 7
-    return base_date + timedelta(days=days_ahead)
-
-
-def _extract_time(text: str) -> time | None:
-    if not text:
-        return None
-    if "after lunch" in text:
-        return time(hour=13, minute=0)
-    if "before lunch" in text:
-        return time(hour=11, minute=30)
-    if "lunchtime" in text or "lunch" in text:
-        return time(hour=12, minute=0)
-    if "noon" in text:
-        return time(hour=12, minute=0)
-    if "midnight" in text:
-        return time(hour=0, minute=0)
-    if "this morning" in text or re.search(r"\bmorning\b", text):
-        return time(hour=9, minute=0)
-    if "this afternoon" in text or re.search(r"\bafternoon\b", text):
-        return time(hour=15, minute=0)
-    if "this evening" in text or "tonight" in text or re.search(r"\bevening\b", text):
-        return time(hour=19, minute=0)
-
-    before_match = re.search(r"\bbefore\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", text)
-    if before_match:
-        target_minutes = _time_match_to_minutes(before_match.group(1), before_match.group(2), before_match.group(3))
-        target_minutes = max(0, target_minutes - 30)
-        return time(hour=target_minutes // 60, minute=target_minutes % 60)
-
-    match = re.search(r"\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", text)
-    if not match:
-        return None
-    total_minutes = _time_match_to_minutes(match.group(1), match.group(2), match.group(3))
-    hour = total_minutes // 60
-    minute = total_minutes % 60
-    if hour > 23 or minute > 59:
-        raise ValueError("I couldn't understand that reminder time.")
-    return time(hour=hour, minute=minute)
-
-
-def _time_match_to_minutes(hour_text: str, minute_text: str | None, meridiem_text: str | None) -> int:
-    hour = int(hour_text)
-    minute = int(minute_text or 0)
-    meridiem = (meridiem_text or "").lower()
-    if meridiem:
-        if meridiem == "pm" and hour != 12:
-            hour += 12
-        if meridiem == "am" and hour == 12:
-            hour = 0
-    return (hour * 60) + minute
-
-
-def _default_time_for_phrase(text: str) -> time:
-    if "tonight" in text or "this evening" in text:
-        return time(hour=19, minute=0)
-    if "this afternoon" in text:
-        return time(hour=15, minute=0)
-    return DEFAULT_REMINDER_TIME
 
 
 def _infer_list_window(message: str) -> str:
@@ -599,18 +433,6 @@ def _infer_list_window(message: str) -> str:
         return "today"
     return "upcoming"
 
-
-def _display_due(value: str) -> str:
-    due_at = _parse_iso(value)
-    return due_at.strftime("%Y-%m-%d %I:%M %p")
-
-
-def _parse_iso(value: str) -> datetime:
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
-    return parsed.astimezone()
-
-
 def _clean_text(value: str) -> str:
     return str(value or "").strip().rstrip("?.!,")
+

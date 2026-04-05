@@ -374,6 +374,48 @@ def append_turn(
         )
 
 
+def update_latest_tool_turn(
+    *,
+    conversation_id: Optional[int] = None,
+    tool_kind: str,
+    tool_payload: Dict[str, Any] | None = None,
+    message: str | None = None,
+) -> bool:
+    conn = _connect()
+    with _lock, conn:
+        cid = int(conversation_id or _get_active_conversation_id(conn))
+        row = conn.execute(
+            """
+            SELECT id
+            FROM conversation_history
+            WHERE conversation_id = ? AND role = 'assistant' AND tool_kind = ?
+            ORDER BY id DESC
+            LIMIT 1;
+            """,
+            (cid, tool_kind),
+        ).fetchone()
+        if row is None:
+            return False
+
+        updates: list[str] = []
+        params: list[Any] = []
+        if message is not None:
+            updates.append("message = ?")
+            params.append(message)
+        if tool_payload is not None:
+            updates.append("tool_payload_json = ?")
+            params.append(json.dumps(tool_payload, ensure_ascii=True))
+        if not updates:
+            return False
+
+        params.append(int(row["id"]))
+        conn.execute(
+            f"UPDATE conversation_history SET {', '.join(updates)} WHERE id = ?;",
+            tuple(params),
+        )
+        return True
+
+
 def clear_conversation(conversation_id: Optional[int] = None) -> None:
     conn = _connect()
     with _lock, conn:

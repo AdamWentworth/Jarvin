@@ -1,9 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-import backend.agent.brief_planner as brief_planner
-import backend.agent.briefing_tools as briefing_tools
+import backend.agent.briefing.brief_request_planner as brief_planner
+import backend.agent.briefing.brief_request_tools as briefing_tools
 
 
 def test_morning_brief_combines_weather_calendar_and_reminders(monkeypatch):
@@ -24,15 +24,17 @@ def test_morning_brief_combines_weather_calendar_and_reminders(monkeypatch):
     monkeypatch.setattr(
         briefing_tools,
         "get_weather",
-        lambda location: type(
+        lambda location, day_offset=0: type(
             "Weather",
             (),
             {
                 "location_label": "Seattle, Washington, United States",
+                "target_label": "Today",
                 "forecast_summary": "Clear sky",
-                "temperature": "48°",
-                "feels_like": "46°",
-                "daily_outlook": "High 58°, low 44°, precip 0%",
+                "temperature": "48Â°",
+                "feels_like": "46Â°",
+                "daily_outlook": "High 58Â°, low 44Â°, precip 0%",
+                "is_current_day": True,
             },
         )(),
         raising=True,
@@ -47,7 +49,15 @@ def test_morning_brief_combines_weather_calendar_and_reminders(monkeypatch):
             (),
             {
                 "events": [
-                    type("Event", (), {"starts_at": "2026-04-04 10:00 AM", "title": "Standup", "location": "Desk"})()
+                    type(
+                        "Event",
+                        (),
+                        {
+                            "starts_at": now.replace(hour=10, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %I:%M %p"),
+                            "title": "Standup",
+                            "location": "Desk",
+                        },
+                    )()
                 ]
             },
         )(),
@@ -140,9 +150,9 @@ def test_morning_brief_can_target_tomorrow(monkeypatch):
                 "location_label": "Seattle, Washington, United States",
                 "target_label": "Tomorrow",
                 "forecast_summary": "Rain showers",
-                "temperature": "55°",
-                "feels_like": "Low 48°",
-                "daily_outlook": "High 55°, low 48°, rain chance 80%.",
+                "temperature": "55Â°",
+                "feels_like": "Low 48Â°",
+                "daily_outlook": "High 55Â°, low 48Â°, rain chance 80%.",
                 "is_current_day": False,
             },
         )(),
@@ -185,3 +195,4 @@ def test_morning_brief_can_target_tomorrow(monkeypatch):
     assert "Tomorrow" in reply
     assert "Coffee" in reply
     assert "Leave early" in reply
+

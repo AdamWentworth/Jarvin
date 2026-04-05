@@ -185,7 +185,7 @@ async def test_chat_endpoint_can_handle_tool_commands(monkeypatch):
     monkeypatch.setattr(
         chat_mod,
         "maybe_handle_assistant_tool_request",
-        lambda text, conversation_id=None: type(
+        lambda text, conversation_id=None, agent_access_mode=None: type(
             "ToolReply",
             (),
             {"handled": True, "reply": "Search results for `todo`: ...", "tool_kind": None, "tool_payload": None},
@@ -210,7 +210,7 @@ async def test_chat_endpoint_can_speak_tool_command_replies(monkeypatch):
     monkeypatch.setattr(
         chat_mod,
         "maybe_handle_assistant_tool_request",
-        lambda text, conversation_id=None: type(
+        lambda text, conversation_id=None, agent_access_mode=None: type(
             "ToolReply",
             (),
             {
@@ -241,18 +241,26 @@ async def test_chat_endpoint_passes_conversation_id_to_tool_router(monkeypatch):
     monkeypatch.setattr(chat_mod, "get_conversation_history", lambda conversation_id=None: [], raising=True)
     monkeypatch.setattr(chat_mod, "append_turn", lambda role, message, conversation_id=None, **kwargs: None, raising=True)
 
-    def fake_tool_router(text, conversation_id=None):
+    def fake_tool_router(text, conversation_id=None, agent_access_mode=None):
         captured["text"] = text
         captured["conversation_id"] = conversation_id
+        captured["agent_access_mode"] = agent_access_mode
         return type("ToolReply", (), {"handled": True, "reply": "Handled via tool", "tool_kind": None, "tool_payload": None})()
 
     monkeypatch.setattr(chat_mod, "maybe_handle_assistant_tool_request", fake_tool_router, raising=True)
 
-    resp = await chat_mod.chat_endpoint(ChatRequest(user_text="delete lunch from my calendar", conversation_id=77))
+    resp = await chat_mod.chat_endpoint(
+        ChatRequest(
+            user_text="delete lunch from my calendar",
+            conversation_id=77,
+            agent_access_mode="approve_risky",
+        )
+    )
 
     assert resp.reply == "Handled via tool"
     assert resp.conversation_id == 77
     assert captured == {
         "text": "delete lunch from my calendar",
         "conversation_id": 77,
+        "agent_access_mode": "approve_risky",
     }

@@ -1,10 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timedelta
 
 import config as cfg
-import backend.agent.reminder_planner as reminder_planner
-from backend.agent.reminder_tools import handle_reminder_command, maybe_handle_reminder_request
+import backend.agent.reminders.reminder_request_planner as reminder_planner
+from backend.agent.reminders.reminder_request_tools import handle_reminder_command, maybe_handle_reminder_request
 import memory.reminders as reminders
 
 
@@ -150,3 +150,4 @@ def test_pronoun_move_uses_recent_reminder_context(tmp_path):
     finally:
         reminders._reset_for_tests()
         reminder_planner.clear_reminder_context(44)
+

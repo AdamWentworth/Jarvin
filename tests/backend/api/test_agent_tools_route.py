@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pytest
 
@@ -10,7 +10,7 @@ from backend.api.schemas import (
     AgentWriteRequest,
 )
 import backend.api.routes.agent_tools as agent_tools_mod
-from backend.agent.tools import CommandResult, ReadResult, SearchMatch, SearchResult, WriteResult
+from backend.agent.host_tool_runtime import CommandResult, ReadResult, SearchMatch, SearchResult, WriteResult
 
 
 @pytest.mark.asyncio
@@ -107,3 +107,4 @@ async def test_agent_tools_run(monkeypatch):
     resp = await agent_tools_mod.agent_tools_run(AgentCommandRequest(command="git status"))
     assert resp.command == "git status"
     assert resp.stdout == "ok"
+

@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import backend.agent.calendar_tools as calendar_tools
+import backend.agent.calendar.calendar_request_tools as calendar_tools
 
 
 def test_calendar_planner_handles_look_at_my_calendar_today():
@@ -120,3 +120,4 @@ def test_calendar_planner_can_use_llm_for_fuzzy_move_with_context(monkeypatch):
     assert plan.action == "move"
     assert plan.query == "Lunch with Sam"
     assert plan.when_text == "back an hour"
+

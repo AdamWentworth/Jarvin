@@ -1,7 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import backend.agent.weather_tools as weather_tools
-from backend.agent.external_tools import WeatherResult
+import backend.agent.weather.weather_request_tools as weather_tools
+from backend.agent.integration_facade import WeatherResult
 
 
 def test_weather_agent_returns_structured_payload(monkeypatch):
@@ -22,10 +22,10 @@ def test_weather_agent_returns_structured_payload(monkeypatch):
         lambda location_query, day_offset=0: WeatherResult(
             location_label="Burnaby, British Columbia, Canada",
             forecast_summary="Light rain",
-            temperature="15°",
-            feels_like="12°",
+            temperature="15Â°",
+            feels_like="12Â°",
             wind="9 mph",
-            daily_outlook="High 15°, low 10°, rain chance 70%.",
+            daily_outlook="High 15Â°, low 10Â°, rain chance 70%.",
             target_label="Tomorrow",
             date_label="Sun, Apr 05",
             temperature_value=15,
@@ -99,10 +99,10 @@ def test_weather_agent_uses_recent_context_for_follow_up(monkeypatch):
         return WeatherResult(
             location_label="Burnaby, British Columbia, Canada",
             forecast_summary="Overcast",
-            temperature="13°",
-            feels_like="Low 9°",
+            temperature="13Â°",
+            feels_like="Low 9Â°",
             wind="7 mph",
-            daily_outlook="High 13°, low 9°, rain chance 20%.",
+            daily_outlook="High 13Â°, low 9Â°, rain chance 20%.",
             target_label="Tomorrow",
             date_label="Sun, Apr 05",
             temperature_value=13,
@@ -138,3 +138,4 @@ def test_weather_agent_ignores_meta_weather_complaint_without_context(monkeypatc
     result = weather_tools.maybe_handle_weather_request("Why do you not just use the weather API?")
 
     assert result is None
+

@@ -1,0 +1,1 @@
+"""Workspace agent domain."""

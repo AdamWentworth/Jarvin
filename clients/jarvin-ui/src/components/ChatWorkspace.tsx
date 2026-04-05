@@ -1,8 +1,9 @@
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Bars3Icon, Cog6ToothIcon, MicrophoneIcon, SpeakerWaveIcon, StopIcon } from "@heroicons/react/20/solid";
-import type { Choice, ConversationTurn, WeatherToolPayload } from "../lib/types";
+import type { ApprovalRequestToolPayload, Choice, ConversationTurn, WeatherToolPayload } from "../lib/types";
 import type { ReasoningEffort } from "../lib/ui";
 import type { ConnectionState } from "../lib/runtime";
+import { ApprovalRequestCard } from "./ApprovalRequestCard";
 import { WeatherMessageCard } from "./WeatherMessageCard";
 
 type ChatWorkspaceProps = {
@@ -42,6 +43,8 @@ type ChatWorkspaceProps = {
   onReasoningEffortChange: (value: ReasoningEffort) => void;
   onComposerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onSendMessage: () => void;
+  onApprovePendingAction: () => void;
+  onDenyPendingAction: () => void;
   onToggleRemoteVoice: () => void;
   onRemoteVoicePressStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onRemoteVoicePressEnd: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -90,6 +93,8 @@ export function ChatWorkspace({
   onReasoningEffortChange,
   onComposerKeyDown,
   onSendMessage,
+  onApprovePendingAction,
+  onDenyPendingAction,
   onToggleRemoteVoice,
   onRemoteVoicePressStart,
   onRemoteVoicePressEnd,
@@ -105,6 +110,13 @@ export function ChatWorkspace({
       return null;
     }
     return turn.tool_payload as WeatherToolPayload;
+  }
+
+  function approvalPayloadForTurn(turn: ConversationTurn): ApprovalRequestToolPayload | null {
+    if (turn.tool_kind !== "approval_request" || !turn.tool_payload) {
+      return null;
+    }
+    return turn.tool_payload as ApprovalRequestToolPayload;
   }
 
   return (
@@ -166,16 +178,26 @@ export function ChatWorkspace({
           ) : (
             history.map((turn, index) => {
               const weatherPayload = weatherPayloadForTurn(turn);
+              const approvalPayload = approvalPayloadForTurn(turn);
+              const hasToolCard = Boolean(weatherPayload || approvalPayload);
 
               return (
                 <article
                   key={`${turn.role}-${index}`}
                   className={`message-row ${turn.role === "user" ? "user" : "assistant"}`}
                 >
-                  <div className={`message-card ${weatherPayload ? "has-tool-card" : ""}`}>
+                  <div className={`message-card ${hasToolCard ? "has-tool-card" : ""}`}>
                     <div className="message-role">{turn.role === "user" ? "You" : "Jarvin"}</div>
                     <div className="message-text">{turn.message}</div>
                     {weatherPayload ? <WeatherMessageCard payload={weatherPayload} /> : null}
+                    {approvalPayload ? (
+                      <ApprovalRequestCard
+                        payload={approvalPayload}
+                        sending={sending}
+                        onApprove={onApprovePendingAction}
+                        onDeny={onDenyPendingAction}
+                      />
+                    ) : null}
                   </div>
                 </article>
               );

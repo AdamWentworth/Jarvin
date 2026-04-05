@@ -1,6 +1,6 @@
-import type { ChatMode, ConversationSummary, LiveSnapshot, StatusResponse, UserProfilePayload } from "./types";
+import type { AgentAccessMode, ChatMode, ConversationSummary, LiveSnapshot, StatusResponse, UserProfilePayload } from "./types";
 
-export type InspectorSection = "assistant" | "voice" | "notifications" | "profile" | "diagnostics";
+export type InspectorSection = "general" | "voice" | "notifications" | "profile" | "diagnostics";
 export type ReasoningEffort = "low" | "medium" | "high" | "extra_high";
 
 export const MODE_OPTIONS: Array<{ value: ChatMode; label: string }> = [
@@ -25,8 +25,26 @@ export const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }>
   { value: "extra_high", label: "Extra High" },
 ];
 
+export const AGENT_ACCESS_OPTIONS: Array<{ value: AgentAccessMode; label: string; hint: string }> = [
+  {
+    value: "read_only",
+    label: "Read only",
+    hint: "Jarvin can inspect and research, but not change files or run host commands.",
+  },
+  {
+    value: "approve_risky",
+    label: "Approve risky actions",
+    hint: "Jarvin can prepare writes and commands, then wait for your approval.",
+  },
+  {
+    value: "full_access",
+    label: "Trusted full access",
+    hint: "Jarvin can immediately run allowed host commands and workspace writes from this client.",
+  },
+];
+
 export const INSPECTOR_SECTIONS: Array<{ value: InspectorSection; label: string }> = [
-  { value: "assistant", label: "Assistant" },
+  { value: "general", label: "General" },
   { value: "voice", label: "Voice" },
   { value: "notifications", label: "Notifications" },
   { value: "profile", label: "Profile" },

@@ -1,102 +1,169 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import "./App.css";
+import "./App.chat.css";
 import "./App.chrome.css";
+import "./App.layout.css";
 import {
   activateConversation,
-  applyLlmSelection,
-  clearStoredApiBaseUrl,
-  clearConversation,
   createConversation,
-  deleteConversation,
-  getApiBaseUrl,
-  getAudioDevices,
-  getHealth,
-  getLive,
-  getLlmOptions,
-  getStoredApiBaseUrl,
-  getStatus,
-  getWorkspaceBootstrap,
-  renameConversation,
   saveProfile,
-  selectAudioDevice,
   sendChatMessage,
-  setStoredApiBaseUrl,
-  shutdownHost,
-  startListener,
-  stopListener,
 } from "./lib/api";
-import type {
-  AudioDevicesResponse,
-  ConversationSummary,
-  ConversationTurn,
-  HealthResponse,
-  LLMOptionsResponse,
-  LiveSnapshot,
-  StatusResponse,
-  UserProfilePayload,
-} from "./lib/types";
+import type { AgentAccessMode, UserProfilePayload } from "./lib/types";
 import {
   DEFAULT_PROFILE,
   historyTitle,
   reasoningToChatMode,
-  statusLabel,
   type InspectorSection,
   type ReasoningEffort,
 } from "./lib/ui";
 import {
-  connectionLabel,
-  formatTimestamp,
+  getStoredAgentAccessMode,
   getStoredChatDraft,
+  setStoredAgentAccessMode,
   setStoredChatDraft,
-  type ConnectionState,
   type SendSource,
 } from "./lib/runtime";
 import { useReminderNotifications } from "./hooks/useReminderNotifications";
 import { useRemoteVoice } from "./hooks/useRemoteVoice";
-import { ConversationSidebar } from "./components/ConversationSidebar";
-import { ChatWorkspace } from "./components/ChatWorkspace";
-import { SettingsOverlay } from "./components/SettingsOverlay";
-import { describeError, syncWorkspaceState } from "./lib/workspace";
+import { useJarvinHost } from "./hooks/useJarvinHost";
+import { useConversationWorkspace } from "./hooks/useConversationWorkspace";
+import { AppWorkspaceShell } from "./components/AppWorkspaceShell";
+import { describeError } from "./lib/workspace";
 
 function App() {
-  const apiBaseUrl = getApiBaseUrl();
   const [profile, setProfile] = useState<UserProfilePayload>(DEFAULT_PROFILE);
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
-  const [history, setHistory] = useState<ConversationTurn[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("medium");
-  const [llmOptions, setLlmOptions] = useState<LLMOptionsResponse | null>(null);
-  const [selectedBackend, setSelectedBackend] = useState("llama_cpp");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [audioDevices, setAudioDevices] = useState<AudioDevicesResponse | null>(null);
-  const [selectedDeviceIndex, setSelectedDeviceIndex] = useState<number | "">("");
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [live, setLive] = useState<LiveSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [isClientOnline, setIsClientOnline] = useState<boolean>(() => (typeof navigator === "undefined" ? true : navigator.onLine));
-  const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
-  const [lastConnectionError, setLastConnectionError] = useState("");
-  const [lastSuccessfulContactAt, setLastSuccessfulContactAt] = useState<string | null>(null);
-  const [lastRoundTripMs, setLastRoundTripMs] = useState<number | null>(null);
-  const [connectionError, setConnectionError] = useState("");
-  const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState<string>(() => getStoredApiBaseUrl() ?? getApiBaseUrl());
-  const [apiBaseUrlStatus, setApiBaseUrlStatus] = useState("");
+  const [agentAccessMode, setAgentAccessMode] = useState<AgentAccessMode>(() => getStoredAgentAccessMode());
   const [chatStatus, setChatStatus] = useState("");
-  const [llmStatus, setLlmStatus] = useState("");
   const [profileStatus, setProfileStatus] = useState("");
-  const [deviceStatus, setDeviceStatus] = useState("");
-  const [openConversationMenuId, setOpenConversationMenuId] = useState<number | null>(null);
-  const [editingConversationId, setEditingConversationId] = useState<number | null>(null);
-  const [editingConversationTitle, setEditingConversationTitle] = useState("");
-  const [activeInspectorSection, setActiveInspectorSection] = useState<InspectorSection>("assistant");
+  const [activeInspectorSection, setActiveInspectorSection] = useState<InspectorSection>("general");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const lastLiveSeq = useRef<number | null>(null);
-  const consecutivePollFailuresRef = useRef(0);
+  const [sending, setSending] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+
+  const workspace = useConversationWorkspace({
+    describeError,
+    onProfileSync: setProfile,
+    onStatusChange: setChatStatus,
+    onChatInputReset: () => setChatInput(""),
+    onCloseMobileSidebar: () => setIsMobileSidebarOpen(false),
+  });
+
+  const host = useJarvinHost({
+    activeConversationId: workspace.activeConversationId,
+    describeError,
+    onWorkspaceSync: workspace.syncWorkspace,
+    reportError: setChatStatus,
+    sending,
+  });
+
+  async function handleSendMessage(rawText?: string, source: SendSource = "typed") {
+    const text = (rawText ?? chatInput).trim();
+    if (!text || sending) {
+      return;
+    }
+
+    if (isReplyAudioPlaying) {
+      stopReplyAudio({ quiet: true });
+    }
+
+    if (source === "typed") {
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        chat: "working",
+        note: "Sending typed message to the host.",
+      }));
+    } else {
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        chat: "working",
+        note: "Sending transcribed speech to the host chat endpoint.",
+      }));
+    }
+
+    let conversationId = workspace.activeConversationId;
+    if (conversationId === null) {
+      try {
+        const createdWorkspace = await createConversation();
+        workspace.syncWorkspace(createdWorkspace);
+        conversationId = createdWorkspace.active_conversation_id;
+      } catch (error) {
+        setRemoteVoiceStage("chat", "error");
+        setRemoteVoiceDiagnostics((current) => ({ ...current, note: "Could not create a conversation for the new message." }));
+        setChatStatus(describeError(error));
+        return;
+      }
+    }
+
+    setSending(true);
+    try {
+      if (
+        host.selectedBackend !== (host.llmOptions?.current_backend ?? "") ||
+        host.selectedModel !== (host.llmOptions?.current_model ?? "")
+      ) {
+        setChatStatus("Switching model...");
+        await host.handleApplyLlmSettings();
+      }
+
+      setChatStatus("Thinking...");
+      const response = await sendChatMessage({
+        userText: text,
+        conversationId,
+        mode: reasoningToChatMode(reasoningEffort),
+        speakReply: speakRepliesOnThisDevice,
+        agentAccessMode,
+      });
+      const nextConversationId = response.conversation_id ?? conversationId;
+      if (nextConversationId === null) {
+        throw new Error("Jarvin did not return a conversation id for this reply.");
+      }
+
+      const activatedWorkspace = await activateConversation(nextConversationId);
+      workspace.syncWorkspace(activatedWorkspace);
+      if (rawText === undefined) {
+        setChatInput("");
+      }
+
+      if (response.tts_url) {
+        setLatestReplyAudioUrl(response.tts_url);
+        setRemoteVoiceStage("chat", "done");
+        if (speakRepliesOnThisDevice) {
+          try {
+            await playReplyAudio(response.tts_url);
+          } catch {
+            setReplyAudioStatus("Reply audio is ready. Tap play to hear it on this device.");
+          }
+        } else {
+          setReplyAudioStatus("Reply audio is ready.");
+          setRemoteVoiceStage("playback", "done");
+        }
+      } else {
+        setLatestReplyAudioUrl(null);
+        setReplyAudioStatus(speakRepliesOnThisDevice ? "Reply audio was not available for this response." : "");
+        setRemoteVoiceStage("chat", "done");
+        setRemoteVoiceStage("playback", speakRepliesOnThisDevice ? "error" : "idle");
+      }
+
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        note: source === "remote_voice" ? "Remote speech completed its round trip." : "Typed message completed successfully.",
+      }));
+      if (notificationsEnabled) {
+        void syncReminderNotifications();
+      }
+      setChatStatus("");
+    } catch (error) {
+      setRemoteVoiceStage("chat", "error");
+      setRemoteVoiceDiagnostics((current) => ({ ...current, note: describeError(error) }));
+      setChatStatus(describeError(error));
+    } finally {
+      setSending(false);
+    }
+  }
+
   const {
     handlePlayLatestReplyAudio,
     handleRemoteVoicePressCancel,
@@ -127,6 +194,7 @@ function App() {
       await handleSendMessage(text, source);
     },
   });
+
   const {
     notificationsEnabled,
     notificationsSupported,
@@ -141,150 +209,18 @@ function App() {
     setNotificationsEnabled,
     syncReminderNotifications,
   } = useReminderNotifications({
-    apiBaseUrl,
-    isClientOnline,
+    apiBaseUrl: host.apiBaseUrl,
+    isClientOnline: host.isClientOnline,
     describeError,
   });
 
-  const currentListenerStatus = useMemo(
-    () => statusLabel(status, live),
-    [status, live],
-  );
-
-  const connectionSummary = useMemo(() => {
-    if (!isClientOnline) {
-      return "Client device is offline";
-    }
-    const base = connectionLabel(connectionState);
-    if (connectionState === "connected") {
-      if (lastRoundTripMs !== null) {
-        return `${base} • ${lastRoundTripMs} ms`;
-      }
-      return base;
-    }
-    if (lastConnectionError) {
-      return `${base} • ${lastConnectionError}`;
-    }
-    return base;
-  }, [connectionState, isClientOnline, lastConnectionError, lastRoundTripMs]);
-
-  const lastSuccessfulContactLabel = useMemo(
-    () => formatTimestamp(lastSuccessfulContactAt),
-    [lastSuccessfulContactAt],
-  );
-  const lastNotificationSyncLabel = useMemo(
-    () => formatTimestamp(lastNotificationSyncAt),
-    [lastNotificationSyncAt],
-  );
-
-  const chatMode = useMemo(
-    () => reasoningToChatMode(reasoningEffort),
-    [reasoningEffort],
-  );
-
-  const modelChoices = useMemo(() => {
-    if (!llmOptions) {
-      return [];
-    }
-    if (selectedBackend === "ollama_http") {
-      return llmOptions.ollama_model_choices;
-    }
-    return llmOptions.local_model_choices;
-  }, [llmOptions, selectedBackend]);
-
-  async function refreshConversationWorkspace() {
-    const workspace = await getWorkspaceBootstrap();
-    syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-    setProfile(workspace.profile);
-  }
-
-  async function refreshWorkspace(options?: { withLoading?: boolean; reason?: "initial" | "manual" | "reconnect" }) {
-    const withLoading = options?.withLoading ?? true;
-    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (withLoading) {
-      setLoading(true);
-    }
-    setConnectionState(options?.reason === "reconnect" ? "degraded" : "connecting");
-    setConnectionError("");
-    try {
-      const [workspace, llm, devices, currentHealth, currentStatus, currentLive] = await Promise.all([
-        getWorkspaceBootstrap(),
-        getLlmOptions(),
-        getAudioDevices(),
-        getHealth(),
-        getStatus(),
-        getLive(),
-      ]);
-
-      syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-      setProfile(workspace.profile);
-      setLlmOptions(llm);
-      setSelectedBackend(llm.current_backend);
-      setSelectedModel(llm.current_model);
-      setLlmStatus(llm.message ?? "");
-      setAudioDevices(devices);
-      setSelectedDeviceIndex(devices.selected_index ?? "");
-      setHealth(currentHealth);
-      setStatus(currentStatus);
-      setLive(currentLive);
-      lastLiveSeq.current = currentLive.seq ?? null;
-      setChatStatus("");
-      setApiBaseUrlStatus("");
-      setConnectionState("connected");
-      setLastConnectionError("");
-      setLastSuccessfulContactAt(new Date().toISOString());
-      setLastRoundTripMs(Math.max(1, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)));
-      consecutivePollFailuresRef.current = 0;
-    } catch (error) {
-      const message = describeError(error);
-      setConnectionError(message);
-      setLastConnectionError(message);
-      setConnectionState("offline");
-    } finally {
-      if (withLoading) {
-        setLoading(false);
-      }
-    }
-  }
+  useEffect(() => {
+    setChatInput(getStoredChatDraft(workspace.activeConversationId));
+  }, [workspace.activeConversationId]);
 
   useEffect(() => {
-    void refreshWorkspace({ withLoading: true, reason: "initial" });
-  }, []);
-
-  useEffect(() => {
-    if (!llmOptions) {
-      return;
-    }
-    const available = modelChoices.map((item) => item.value);
-    if (!available.includes(selectedModel)) {
-      setSelectedModel(available[0] ?? "");
-    }
-  }, [llmOptions, modelChoices, selectedModel]);
-
-  useEffect(() => {
-    setChatInput(getStoredChatDraft(activeConversationId));
-  }, [activeConversationId]);
-
-  useEffect(() => {
-    setStoredChatDraft(activeConversationId, chatInput);
-  }, [activeConversationId, chatInput]);
-
-  useEffect(() => {
-    function handleOnline() {
-      setIsClientOnline(true);
-    }
-
-    function handleOffline() {
-      setIsClientOnline(false);
-    }
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
+    setStoredChatDraft(workspace.activeConversationId, chatInput);
+  }, [workspace.activeConversationId, chatInput]);
 
   useEffect(() => {
     const node = messageListRef.current;
@@ -292,21 +228,10 @@ function App() {
       return;
     }
     node.scrollTop = node.scrollHeight;
-  }, [history, sending]);
+  }, [workspace.history, sending]);
 
   useEffect(() => {
-    if (editingConversationId === null) {
-      return;
-    }
-    const match = conversations.find((item) => item.id === editingConversationId);
-    if (!match) {
-      setEditingConversationId(null);
-      setEditingConversationTitle("");
-    }
-  }, [conversations, editingConversationId]);
-
-  useEffect(() => {
-    if (openConversationMenuId === null && editingConversationId === null && !isSettingsOpen) {
+    if (workspace.openConversationMenuId === null && workspace.editingConversationId === null && !isSettingsOpen) {
       return;
     }
 
@@ -314,14 +239,13 @@ function App() {
       if (event.key !== "Escape") {
         return;
       }
-      setOpenConversationMenuId(null);
-      setEditingConversationId(null);
-      setEditingConversationTitle("");
+      workspace.setOpenConversationMenuId(null);
+      workspace.handleCancelRenameConversation();
       setIsSettingsOpen(false);
     }
 
     function handleWindowClick() {
-      setOpenConversationMenuId(null);
+      workspace.setOpenConversationMenuId(null);
     }
 
     window.addEventListener("keydown", handleEscape);
@@ -330,276 +254,11 @@ function App() {
       window.removeEventListener("keydown", handleEscape);
       window.removeEventListener("click", handleWindowClick);
     };
-  }, [openConversationMenuId, editingConversationId, isSettingsOpen]);
+  }, [isSettingsOpen, workspace]);
 
-  useEffect(() => {
-    const poll = window.setInterval(async () => {
-      try {
-        const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-        const [currentHealth, currentStatus, currentLive] = await Promise.all([getHealth(), getStatus(), getLive()]);
-        setHealth(currentHealth);
-        setStatus(currentStatus);
-        setLive(currentLive);
-        setConnectionState("connected");
-        setLastConnectionError("");
-        setLastSuccessfulContactAt(new Date().toISOString());
-        setLastRoundTripMs(Math.max(1, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)));
-        consecutivePollFailuresRef.current = 0;
-
-        const nextSeq = currentLive.seq ?? null;
-        if (
-          nextSeq !== null &&
-          nextSeq !== lastLiveSeq.current &&
-          activeConversationId !== null &&
-          !sending
-        ) {
-          lastLiveSeq.current = nextSeq;
-          const workspace = await activateConversation(activeConversationId);
-          syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-        } else {
-          lastLiveSeq.current = nextSeq;
-        }
-      } catch (error) {
-        consecutivePollFailuresRef.current += 1;
-        setLastConnectionError(describeError(error));
-        setConnectionState(consecutivePollFailuresRef.current >= 3 ? "offline" : "degraded");
-      }
-    }, 1000);
-
-    return () => window.clearInterval(poll);
-  }, [activeConversationId, sending]);
-
-  async function handleReconnectHost() {
-    setApiBaseUrlStatus("Reconnecting to the Jarvin host...");
-    await refreshWorkspace({ withLoading: false, reason: "reconnect" });
-  }
-
-  async function handleSelectConversation(conversationId: number) {
-    setOpenConversationMenuId(null);
-    setEditingConversationId(null);
-    setChatStatus("Loading conversation...");
-    try {
-      const workspace = await activateConversation(conversationId);
-      syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-      setIsMobileSidebarOpen(false);
-      setChatStatus("Conversation ready.");
-    } catch (error) {
-      setChatStatus(describeError(error));
-    }
-  }
-
-  async function handleCreateConversation() {
-    setOpenConversationMenuId(null);
-    setEditingConversationId(null);
-    setEditingConversationTitle("");
-    setChatStatus("Creating a fresh workspace...");
-    try {
-      const workspace = await createConversation();
-      syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-      setChatInput("");
-      setIsMobileSidebarOpen(false);
-      setChatStatus("Fresh chat ready.");
-    } catch (error) {
-      setChatStatus(describeError(error));
-    }
-  }
-
-  function handleToggleConversationMenu(event: MouseEvent<HTMLButtonElement>, conversationId: number) {
-    event.stopPropagation();
-    setEditingConversationId(null);
-    setEditingConversationTitle("");
-    setOpenConversationMenuId((current) => (current === conversationId ? null : conversationId));
-  }
-
-  function handleStartRenameConversation(
-    event: MouseEvent<HTMLButtonElement>,
-    conversation: ConversationSummary,
-  ) {
-    event.stopPropagation();
-    setOpenConversationMenuId(null);
-    setEditingConversationId(conversation.id);
-    setEditingConversationTitle(conversation.title);
-  }
-
-  function handleCancelRenameConversation() {
-    setEditingConversationId(null);
-    setEditingConversationTitle("");
-  }
-
-  async function handleRenameConversationSubmit(event: FormEvent<HTMLFormElement>, conversationId: number) {
-    event.preventDefault();
-    const nextTitle = editingConversationTitle.trim();
-    if (!nextTitle) {
-      setChatStatus("Give the conversation a title first.");
-      return;
-    }
-    try {
-      await renameConversation(conversationId, nextTitle);
-      await refreshConversationWorkspace();
-      setEditingConversationId(null);
-      setEditingConversationTitle("");
-      setChatStatus("Conversation renamed.");
-    } catch (error) {
-      setChatStatus(describeError(error));
-    }
-  }
-
-  async function handleClearConversation(conversationId: number) {
-    setOpenConversationMenuId(null);
-    if (!window.confirm("Clear this conversation history?")) {
-      return;
-    }
-    try {
-      await clearConversation(conversationId);
-      await refreshConversationWorkspace();
-      setChatStatus("Conversation history cleared.");
-    } catch (error) {
-      setChatStatus(describeError(error));
-    }
-  }
-
-  async function handleDeleteConversation(conversationId: number) {
-    setOpenConversationMenuId(null);
-    if (!window.confirm("Delete this conversation?")) {
-      return;
-    }
-    try {
-      await deleteConversation(conversationId);
-      await refreshConversationWorkspace();
-      setChatStatus("Conversation deleted.");
-    } catch (error) {
-      setChatStatus(describeError(error));
-    }
-  }
-
-  async function handleSendMessage(rawText?: string, source: SendSource = "typed") {
-    const text = (rawText ?? chatInput).trim();
-    if (!text || sending) {
-      return;
-    }
-
-    if (isReplyAudioPlaying) {
-      stopReplyAudio({ quiet: true });
-    }
-
-    if (source === "typed") {
-      setRemoteVoiceDiagnostics((current) => ({
-        ...current,
-        chat: "working",
-        note: "Sending typed message to the host.",
-      }));
-    } else {
-      setRemoteVoiceDiagnostics((current) => ({
-        ...current,
-        chat: "working",
-        note: "Sending transcribed speech to the host chat endpoint.",
-      }));
-    }
-
-    let conversationId = activeConversationId;
-    if (conversationId === null) {
-      try {
-        const workspace = await createConversation();
-        syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-        conversationId = workspace.active_conversation_id;
-      } catch (error) {
-        setRemoteVoiceStage("chat", "error");
-        setRemoteVoiceDiagnostics((current) => ({ ...current, note: "Could not create a conversation for the new message." }));
-        setChatStatus(describeError(error));
-        return;
-      }
-    }
-
-    setSending(true);
-    try {
-      if (selectedBackend !== (llmOptions?.current_backend ?? "") || selectedModel !== (llmOptions?.current_model ?? "")) {
-        setChatStatus("Switching model...");
-        const next = await applyLlmSelection(selectedBackend, selectedModel);
-        setLlmOptions(next);
-        setSelectedBackend(next.current_backend);
-        setSelectedModel(next.current_model);
-        setLlmStatus(next.message ?? "LLM settings updated.");
-      }
-
-      setChatStatus("Thinking...");
-      const response = await sendChatMessage({
-        userText: text,
-        conversationId,
-        mode: chatMode,
-        speakReply: speakRepliesOnThisDevice,
-      });
-      const nextConversationId = response.conversation_id ?? conversationId;
-      if (nextConversationId === null) {
-        throw new Error("Jarvin did not return a conversation id for this reply.");
-      }
-      const workspace = await activateConversation(nextConversationId);
-      syncWorkspaceState(setConversations, setActiveConversationId, setHistory, workspace);
-      if (rawText === undefined) {
-        setChatInput("");
-      }
-      if (response.tts_url) {
-        setLatestReplyAudioUrl(response.tts_url);
-        setRemoteVoiceStage("chat", "done");
-        if (speakRepliesOnThisDevice) {
-          try {
-            await playReplyAudio(response.tts_url);
-          } catch {
-            setReplyAudioStatus("Reply audio is ready. Tap play to hear it on this device.");
-          }
-        } else {
-          setReplyAudioStatus("Reply audio is ready.");
-          setRemoteVoiceStage("playback", "done");
-        }
-      } else {
-        setLatestReplyAudioUrl(null);
-        setReplyAudioStatus(speakRepliesOnThisDevice ? "Reply audio was not available for this response." : "");
-        setRemoteVoiceStage("chat", "done");
-        setRemoteVoiceStage("playback", speakRepliesOnThisDevice ? "error" : "idle");
-      }
-      setRemoteVoiceDiagnostics((current) => ({
-        ...current,
-        note: source === "remote_voice" ? "Remote speech completed its round trip." : "Typed message completed successfully.",
-      }));
-      if (notificationsEnabled) {
-        void syncReminderNotifications();
-      }
-      setChatStatus("");
-    } catch (error) {
-      setRemoteVoiceStage("chat", "error");
-      setRemoteVoiceDiagnostics((current) => ({ ...current, note: describeError(error) }));
-      setChatStatus(describeError(error));
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function handleApplyLlmSettings() {
-    if (!selectedBackend || !selectedModel) {
-      setLlmStatus("Choose a backend and model first.");
-      return;
-    }
-    setLlmStatus("Applying LLM settings...");
-    try {
-      const next = await applyLlmSelection(selectedBackend, selectedModel);
-      setLlmOptions(next);
-      setSelectedBackend(next.current_backend);
-      setSelectedModel(next.current_model);
-      setLlmStatus(next.message ?? "LLM settings updated.");
-    } catch (error) {
-      setLlmStatus(describeError(error));
-    }
-  }
-
-  async function handleRefreshLlmSettings() {
-    try {
-      const next = await getLlmOptions();
-      setLlmOptions(next);
-      setSelectedBackend(next.current_backend);
-      setSelectedModel(next.current_model);
-      setLlmStatus(next.message ?? "Model list refreshed.");
-    } catch (error) {
-      setLlmStatus(describeError(error));
-    }
+  function handleAgentAccessModeChange(value: AgentAccessMode) {
+    setAgentAccessMode(value);
+    setStoredAgentAccessMode(value);
   }
 
   async function handleSaveProfile(event: FormEvent<HTMLFormElement>) {
@@ -614,55 +273,6 @@ function App() {
     }
   }
 
-  async function handleSelectAudioDevice(index: number) {
-    setSelectedDeviceIndex(index);
-    setDeviceStatus("Applying input device...");
-    try {
-      const result = await selectAudioDevice(index);
-      const devices = await getAudioDevices();
-      setAudioDevices(devices);
-      setSelectedDeviceIndex(devices.selected_index ?? "");
-      setDeviceStatus(result.message ?? "Input device updated.");
-    } catch (error) {
-      setDeviceStatus(describeError(error));
-    }
-  }
-
-  async function handleListenerAction(action: "start" | "stop" | "shutdown") {
-    try {
-      if (action === "start") {
-        await startListener();
-      } else if (action === "stop") {
-        await stopListener();
-      } else {
-        await shutdownHost();
-      }
-      const nextStatus = await getStatus();
-      setStatus(nextStatus);
-    } catch (error) {
-      setChatStatus(describeError(error));
-    }
-  }
-
-  async function handleSaveApiBaseUrl() {
-    try {
-      const next = setStoredApiBaseUrl(apiBaseUrlDraft);
-      setApiBaseUrlDraft(next);
-      setApiBaseUrlStatus("Saved host URL. Trying connection...");
-      await refreshWorkspace({ withLoading: false, reason: "reconnect" });
-    } catch (error) {
-      setApiBaseUrlStatus(describeError(error));
-    }
-  }
-
-  async function handleClearApiBaseUrlOverride() {
-    clearStoredApiBaseUrl();
-    const next = getApiBaseUrl();
-    setApiBaseUrlDraft(next);
-    setApiBaseUrlStatus("Using the default host URL again.");
-    await refreshWorkspace({ withLoading: false, reason: "reconnect" });
-  }
-
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -670,13 +280,10 @@ function App() {
     }
   }
 
-  function handleSelectedBackendChange(value: string) {
-    setSelectedBackend(value);
-    const nextChoices = value === "ollama_http" ? llmOptions?.ollama_model_choices ?? [] : llmOptions?.local_model_choices ?? [];
-    setSelectedModel(nextChoices[0]?.value ?? "");
-  }
+  const lastNotificationSyncLabel =
+    lastNotificationSyncAt === null ? "Never" : new Date(lastNotificationSyncAt).toLocaleString();
 
-  if (loading) {
+  if (host.loading) {
     return (
       <main className="app-shell loading-shell">
         <section className="loading-card">
@@ -688,34 +295,34 @@ function App() {
     );
   }
 
-  if (connectionError) {
+  if (host.connectionError) {
     return (
       <main className="app-shell loading-shell">
         <section className="loading-card error-card">
           <div className="eyebrow">Host Unreachable</div>
           <h1>Jarvin is not answering yet</h1>
-          <p>The desktop client could not reach the host at <code>{apiBaseUrl}</code>.</p>
-          <p className="section-status">{connectionError}</p>
+          <p>The desktop client could not reach the host at <code>{host.apiBaseUrl}</code>.</p>
+          <p className="section-status">{host.connectionError}</p>
           <label className="field-stack">
             <span>Host URL</span>
             <input
-              value={apiBaseUrlDraft}
-              onChange={(event) => setApiBaseUrlDraft(event.currentTarget.value)}
+              value={host.apiBaseUrlDraft}
+              onChange={(event) => host.setApiBaseUrlDraft(event.currentTarget.value)}
               placeholder="http://10.0.0.5:8000"
             />
           </label>
           <div className="button-row">
-            <button type="button" className="secondary-button" onClick={() => void handleSaveApiBaseUrl()}>
+            <button type="button" className="secondary-button" onClick={() => void host.handleSaveApiBaseUrl()}>
               Save host
             </button>
-            <button type="button" className="primary-button" onClick={() => void refreshWorkspace({ withLoading: true, reason: "reconnect" })}>
+            <button type="button" className="primary-button" onClick={() => void host.refreshWorkspace({ withLoading: true, reason: "reconnect" })}>
               Retry connection
             </button>
-            <button type="button" className="ghost-button" onClick={() => void handleClearApiBaseUrlOverride()}>
+            <button type="button" className="ghost-button" onClick={() => void host.handleClearApiBaseUrlOverride()}>
               Reset host
             </button>
           </div>
-          {apiBaseUrlStatus ? <p className="section-status">{apiBaseUrlStatus}</p> : null}
+          {host.apiBaseUrlStatus ? <p className="section-status">{host.apiBaseUrlStatus}</p> : null}
           <p className="section-status">
             Start the host with <code>python server.py</code>, then retry.
           </p>
@@ -725,159 +332,116 @@ function App() {
   }
 
   return (
-    <main className={`app-shell ${isMobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
-      {isMobileSidebarOpen ? (
-        <button
-          type="button"
-          className="mobile-sidebar-backdrop"
-          aria-label="Close conversations"
-          onClick={() => setIsMobileSidebarOpen(false)}
-        />
-      ) : null}
-
-      <section className="workspace-grid">
-        <ConversationSidebar
-          conversations={conversations}
-          activeConversationId={activeConversationId}
-          openConversationMenuId={openConversationMenuId}
-          editingConversationId={editingConversationId}
-          editingConversationTitle={editingConversationTitle}
-          onEditingConversationTitleChange={setEditingConversationTitle}
-          onSelectConversation={(conversationId) => void handleSelectConversation(conversationId)}
-          onCreateConversation={() => void handleCreateConversation()}
-          onToggleConversationMenu={handleToggleConversationMenu}
-          onStartRenameConversation={handleStartRenameConversation}
-          onCancelRenameConversation={handleCancelRenameConversation}
-          onRenameConversationSubmit={(event, conversationId) => void handleRenameConversationSubmit(event, conversationId)}
-          onClearConversation={(conversationId) => void handleClearConversation(conversationId)}
-          onDeleteConversation={(conversationId) => void handleDeleteConversation(conversationId)}
-          isMobileOpen={isMobileSidebarOpen}
-          onCloseMobile={() => setIsMobileSidebarOpen(false)}
-        />
-
-        <ChatWorkspace
-          activeConversationTitle={historyTitle(conversations, activeConversationId)}
-          history={history}
-          messageListRef={messageListRef}
-          chatStatus={chatStatus}
-          connectionState={connectionState}
-          connectionSummary={connectionSummary}
-          lastConnectionError={lastConnectionError}
-          replyAudioStatus={replyAudioStatus}
-          latestReplyAudioReady={Boolean(latestReplyAudioUrl)}
-          isReplyAudioPlaying={isReplyAudioPlaying}
-          chatInput={chatInput}
-          sending={sending}
-          currentListenerStatus={currentListenerStatus}
-          isListening={Boolean(status?.listening)}
-          backendChoices={llmOptions?.backend_choices ?? []}
-          selectedBackend={selectedBackend}
-          selectedModel={selectedModel}
-          modelChoices={modelChoices}
-          reasoningEffort={reasoningEffort}
-          onChatInputChange={setChatInput}
-          onStartListener={() => void handleListenerAction("start")}
-          onPauseListener={() => void handleListenerAction("stop")}
-          onShutdownListener={() => void handleListenerAction("shutdown")}
-          onSelectedBackendChange={handleSelectedBackendChange}
-          onSelectedModelChange={setSelectedModel}
-          onReasoningEffortChange={setReasoningEffort}
-          onComposerKeyDown={handleComposerKeyDown}
-          onSendMessage={() => void handleSendMessage()}
-          remoteVoiceAvailable={remoteVoiceCapability.available}
-          remoteVoiceBusy={isRemoteTranscribing}
-          remoteVoiceDisabledReason={remoteVoiceCapability.reason}
-          remoteVoiceStatus={remoteVoiceStatus}
-          isRemoteRecording={isRemoteRecording}
-          remoteRecordingElapsedLabel={remoteRecordingElapsedLabel}
-          remoteVoicePressToTalk={remoteVoicePressToTalk}
-          speakRepliesOnThisDevice={speakRepliesOnThisDevice}
-          onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
-          onRemoteVoicePressStart={handleRemoteVoicePressStart}
-          onRemoteVoicePressEnd={handleRemoteVoicePressEnd}
-          onRemoteVoicePressCancel={handleRemoteVoicePressCancel}
-          onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
-          onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}
-          onReconnectHost={() => void handleReconnectHost()}
-          onOpenConversationSidebar={() => setIsMobileSidebarOpen(true)}
-          onOpenSettings={() => {
-            setActiveInspectorSection("assistant");
-            setIsSettingsOpen(true);
-          }}
-        />
-      </section>
-
-      <SettingsOverlay
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        apiBaseUrl={apiBaseUrl}
-        apiBaseUrlDraft={apiBaseUrlDraft}
-        onApiBaseUrlDraftChange={setApiBaseUrlDraft}
-        onSaveApiBaseUrl={() => void handleSaveApiBaseUrl()}
-        onClearApiBaseUrl={() => void handleClearApiBaseUrlOverride()}
-        apiBaseUrlStatus={apiBaseUrlStatus}
-        currentListenerStatus={currentListenerStatus}
-        currentModel={llmOptions?.current_model ?? "Unknown"}
-        currentBackend={llmOptions?.current_backend ?? "Unknown"}
-        activeInspectorSection={activeInspectorSection}
-        onSectionChange={setActiveInspectorSection}
-        onRefreshWorkspace={() => void refreshWorkspace({ withLoading: false, reason: "manual" })}
-        onReconnectHost={() => void handleReconnectHost()}
-        llmOptions={llmOptions}
-        selectedBackend={selectedBackend}
-        selectedModel={selectedModel}
-        onSelectedBackendChange={handleSelectedBackendChange}
-        onSelectedModelChange={setSelectedModel}
-        onRefreshLlmSettings={() => void handleRefreshLlmSettings()}
-        onApplyLlmSettings={() => void handleApplyLlmSettings()}
-        llmStatus={llmStatus}
-        audioDevices={audioDevices}
-        selectedDeviceIndex={selectedDeviceIndex}
-        onSelectAudioDevice={(index) => void handleSelectAudioDevice(index)}
-        onListenerAction={(action) => void handleListenerAction(action)}
-        isListening={Boolean(status?.listening)}
-        deviceStatus={deviceStatus}
-        remoteVoiceAvailable={remoteVoiceCapability.available}
-        remoteVoiceDisabledReason={remoteVoiceCapability.reason}
-        remoteVoiceStatus={remoteVoiceStatus}
-        isRemoteRecording={isRemoteRecording}
-        isRemoteTranscribing={isRemoteTranscribing}
-        remoteRecordingElapsedLabel={remoteRecordingElapsedLabel}
-        remoteVoicePressToTalk={remoteVoicePressToTalk}
-        onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
-        speakRepliesOnThisDevice={speakRepliesOnThisDevice}
-        onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}
-        replyAudioStatus={replyAudioStatus}
-        latestReplyAudioReady={Boolean(latestReplyAudioUrl)}
-        isReplyAudioPlaying={isReplyAudioPlaying}
-        onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
-        connectionState={connectionState}
-        connectionSummary={connectionSummary}
-        lastConnectionError={lastConnectionError}
-        lastSuccessfulContactLabel={lastSuccessfulContactLabel}
-        lastRoundTripMs={lastRoundTripMs}
-        isClientOnline={isClientOnline}
-        health={health}
-        remoteVoiceDiagnostics={remoteVoiceDiagnostics}
-        notificationsSupported={notificationsSupported}
-        notificationsEnabled={notificationsEnabled}
-        notificationPermission={notificationPermission}
-        notificationNeedsSystemSettings={notificationNeedsSystemSettings}
-        notificationStatus={notificationStatus}
-        notificationSyncing={notificationSyncing}
-        scheduledReminderCount={scheduledReminderCount}
-        lastNotificationSyncLabel={lastNotificationSyncLabel}
-        onSetNotificationsEnabled={(value) => void setNotificationsEnabled(value)}
-        onRequestNotificationsPermission={() => void requestNotificationsPermission()}
-        onSyncNotifications={() => void syncReminderNotifications()}
-        onSendTestNotification={() => void sendTestNotification()}
-        profile={profile}
-        onProfileChange={setProfile}
-        onSaveProfile={(event) => void handleSaveProfile(event)}
-        profileStatus={profileStatus}
-        live={live}
-      />
-    </main>
+    <AppWorkspaceShell
+      activeConversationId={workspace.activeConversationId}
+      activeConversationTitle={historyTitle(workspace.conversations, workspace.activeConversationId)}
+      activeInspectorSection={activeInspectorSection}
+      agentAccessMode={agentAccessMode}
+      apiBaseUrl={host.apiBaseUrl}
+      apiBaseUrlDraft={host.apiBaseUrlDraft}
+      apiBaseUrlStatus={host.apiBaseUrlStatus}
+      audioDevices={host.audioDevices}
+      backendChoices={host.llmOptions?.backend_choices ?? []}
+      chatInput={chatInput}
+      chatStatus={chatStatus}
+      connectionState={host.connectionState}
+      connectionSummary={host.connectionSummary}
+      conversations={workspace.conversations}
+      currentListenerStatus={host.currentListenerStatus}
+      deviceStatus={host.deviceStatus}
+      editingConversationId={workspace.editingConversationId}
+      editingConversationTitle={workspace.editingConversationTitle}
+      health={host.health}
+      history={workspace.history}
+      isClientOnline={host.isClientOnline}
+      isListening={Boolean(host.status?.listening)}
+      isMobileSidebarOpen={isMobileSidebarOpen}
+      isRemoteRecording={isRemoteRecording}
+      isRemoteTranscribing={isRemoteTranscribing}
+      isReplyAudioPlaying={isReplyAudioPlaying}
+      isSettingsOpen={isSettingsOpen}
+      lastConnectionError={host.lastConnectionError}
+      lastNotificationSyncLabel={lastNotificationSyncLabel}
+      lastRoundTripMs={host.lastRoundTripMs}
+      lastSuccessfulContactLabel={host.lastSuccessfulContactLabel}
+      latestReplyAudioReady={Boolean(latestReplyAudioUrl)}
+      llmOptions={host.llmOptions}
+      llmStatus={host.llmStatus}
+      live={host.live}
+      messageListRef={messageListRef}
+      modelChoices={host.modelChoices}
+      notificationNeedsSystemSettings={notificationNeedsSystemSettings}
+      notificationPermission={notificationPermission}
+      notificationStatus={notificationStatus}
+      notificationsEnabled={notificationsEnabled}
+      notificationsSupported={notificationsSupported}
+      notificationSyncing={notificationSyncing}
+      openConversationMenuId={workspace.openConversationMenuId}
+      profile={profile}
+      profileStatus={profileStatus}
+      reasoningEffort={reasoningEffort}
+      remoteRecordingElapsedLabel={remoteRecordingElapsedLabel}
+      remoteVoiceAvailable={remoteVoiceCapability.available}
+      remoteVoiceDiagnostics={remoteVoiceDiagnostics}
+      remoteVoiceDisabledReason={remoteVoiceCapability.reason}
+      remoteVoicePressToTalk={remoteVoicePressToTalk}
+      remoteVoiceStatus={remoteVoiceStatus}
+      replyAudioStatus={replyAudioStatus}
+      scheduledReminderCount={scheduledReminderCount}
+      selectedBackend={host.selectedBackend}
+      selectedDeviceIndex={host.selectedDeviceIndex}
+      selectedModel={host.selectedModel}
+      sending={sending}
+      speakRepliesOnThisDevice={speakRepliesOnThisDevice}
+      status={host.status}
+      onAgentAccessModeChange={handleAgentAccessModeChange}
+      onApiBaseUrlDraftChange={host.setApiBaseUrlDraft}
+      onApplyLlmSettings={() => void host.handleApplyLlmSettings()}
+      onApprovePendingAction={() => void handleSendMessage("approve")}
+      onCancelRenameConversation={workspace.handleCancelRenameConversation}
+      onChatInputChange={setChatInput}
+      onClearApiBaseUrl={() => void host.handleClearApiBaseUrlOverride()}
+      onClearConversation={(conversationId) => void workspace.handleClearConversation(conversationId)}
+      onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
+      onCloseSettings={() => setIsSettingsOpen(false)}
+      onComposerKeyDown={handleComposerKeyDown}
+      onCreateConversation={() => void workspace.handleCreateConversation()}
+      onDeleteConversation={(conversationId) => void workspace.handleDeleteConversation(conversationId)}
+      onDenyPendingAction={() => void handleSendMessage("deny")}
+      onEditingConversationTitleChange={workspace.setEditingConversationTitle}
+      onListenerAction={(action) => void host.handleListenerAction(action)}
+      onOpenConversationSidebar={() => setIsMobileSidebarOpen(true)}
+      onOpenSettings={() => {
+        setActiveInspectorSection("general");
+        setIsSettingsOpen(true);
+      }}
+      onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
+      onProfileChange={setProfile}
+      onReconnectHost={() => void host.handleReconnectHost()}
+      onRefreshLlmSettings={() => void host.handleRefreshLlmSettings()}
+      onRefreshWorkspace={() => void host.refreshWorkspace({ withLoading: false, reason: "manual" })}
+      onRemoteVoicePressCancel={handleRemoteVoicePressCancel}
+      onRemoteVoicePressEnd={handleRemoteVoicePressEnd}
+      onRemoteVoicePressStart={handleRemoteVoicePressStart}
+      onRenameConversationSubmit={(event, conversationId) => void workspace.handleRenameConversationSubmit(event, conversationId)}
+      onRequestNotificationsPermission={() => void requestNotificationsPermission()}
+      onSaveApiBaseUrl={() => void host.handleSaveApiBaseUrl()}
+      onSaveProfile={(event) => void handleSaveProfile(event)}
+      onSectionChange={setActiveInspectorSection}
+      onSelectAudioDevice={(index) => void host.handleSelectAudioDevice(index)}
+      onSelectConversation={(conversationId) => void workspace.handleSelectConversation(conversationId)}
+      onSelectedBackendChange={host.handleSelectedBackendChange}
+      onSelectedModelChange={host.setSelectedModel}
+      onSendMessage={(rawText, source) => void handleSendMessage(rawText, source)}
+      onSendTestNotification={() => void sendTestNotification()}
+      onSetNotificationsEnabled={(value) => void setNotificationsEnabled(value)}
+      onStartRenameConversation={workspace.handleStartRenameConversation}
+      onSyncNotifications={() => void syncReminderNotifications()}
+      onToggleConversationMenu={workspace.handleToggleConversationMenu}
+      onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
+      onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}
+      onReasoningEffortChange={setReasoningEffort}
+    />
   );
 }
 

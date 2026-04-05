@@ -1,4 +1,5 @@
 import type {
+  AgentAccessMode,
   AudioDevicesResponse,
   AudioSelectResponse,
   ChatMode,
@@ -267,6 +268,7 @@ export function sendChatMessage(params: {
   conversationId: number | null;
   mode: ChatMode;
   speakReply: boolean;
+  agentAccessMode: AgentAccessMode;
 }) {
   return requestJson<ChatResponse>("/chat", {
     method: "POST",
@@ -277,6 +279,7 @@ export function sendChatMessage(params: {
       use_history: true,
       use_profile: true,
       speak_reply: params.speakReply,
+      agent_access_mode: params.agentAccessMode,
     }),
   });
 }

@@ -87,3 +87,18 @@ def test_llm_backend_validator(value, expected, monkeypatch):
     monkeypatch.setenv("JARVIN_LLM_BACKEND", value)
     s = Settings()
     assert s.llm_backend == expected
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("read_only", "read_only"),
+        ("APPROVE_RISKY", "approve_risky"),
+        ("full_access", "full_access"),
+        ("something_else", "approve_risky"),
+    ],
+)
+def test_agent_default_access_mode_validator(value, expected, monkeypatch):
+    monkeypatch.setenv("JARVIN_AGENT_DEFAULT_ACCESS_MODE", value)
+    s = Settings()
+    assert s.agent_default_access_mode == expected
