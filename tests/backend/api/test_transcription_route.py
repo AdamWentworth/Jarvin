@@ -7,6 +7,7 @@ import pytest
 
 import backend.api.app as app_mod
 import backend.api.routes.transcription as transcription_mod
+from backend.agent.voice.voice_transcription_review import VoiceTranscriptionReviewResult
 
 
 @pytest.mark.asyncio
@@ -15,6 +16,16 @@ async def test_transcribe_bytes_route_accepts_base64_audio(monkeypatch, tmp_path
     monkeypatch.setattr(app_mod.cfg.settings, "start_listener_on_boot", False, raising=False)
     monkeypatch.setattr(transcription_mod, "ensure_temp_dir", lambda: str(tmp_path))
     monkeypatch.setattr(transcription_mod, "transcribe_audio", lambda wav_path: f"ok:{wav_path.split('.')[-1]}")
+    monkeypatch.setattr(
+        transcription_mod,
+        "review_remote_transcription",
+        lambda text: VoiceTranscriptionReviewResult(
+            confidence_level="high",
+            confidence_score=0.91,
+            action="accept",
+            review_reason=f"reviewed:{text}",
+        ),
+    )
 
     payload = {
         "audio_base64": base64.b64encode(b"fake-audio").decode("ascii"),
@@ -27,7 +38,17 @@ async def test_transcribe_bytes_route_accepts_base64_audio(monkeypatch, tmp_path
         response = await client.post("/transcribe-bytes", json=payload)
 
     assert response.status_code == 200
-    assert response.json() == {"transcribed_text": "ok:webm"}
+    assert response.json() == {
+        "transcribed_text": "ok:webm",
+        "review": {
+            "confidence_level": "high",
+            "confidence_score": 0.91,
+            "action": "accept",
+            "suggested_text": None,
+            "clarification_message": None,
+            "review_reason": "reviewed:ok:webm",
+        },
+    }
 
 
 @pytest.mark.asyncio

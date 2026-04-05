@@ -1,8 +1,11 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import "./App.chat.css";
 import "./App.chrome.css";
 import "./App.layout.css";
+import "./App.settings.css";
+import "./App.toolcards.css";
+import "./App.voice.css";
 import {
   activateConversation,
   createConversation,
@@ -53,12 +56,26 @@ function App() {
     onCloseMobileSidebar: () => setIsMobileSidebarOpen(false),
   });
 
+  const hasRunningHostTask = useMemo(
+    () =>
+      workspace.history.some(
+        (turn) =>
+          turn.tool_kind === "task_request" &&
+          turn.tool_payload &&
+          typeof turn.tool_payload === "object" &&
+          "status" in turn.tool_payload &&
+          turn.tool_payload.status === "running",
+      ),
+    [workspace.history],
+  );
+
   const host = useJarvinHost({
     activeConversationId: workspace.activeConversationId,
     describeError,
     onWorkspaceSync: workspace.syncWorkspace,
     reportError: setChatStatus,
     sending,
+    shouldPollConversation: hasRunningHostTask,
   });
 
   async function handleSendMessage(rawText?: string, source: SendSource = "typed") {
@@ -168,15 +185,19 @@ function App() {
 
   const {
     handlePlayLatestReplyAudio,
+    handleDismissPendingVoiceReview,
     handleRemoteVoicePressCancel,
     handleRemoteVoicePressEnd,
     handleRemoteVoicePressStart,
+    handleRetryPendingVoiceReview,
+    handleSendReviewedVoiceTranscript,
     handleRemoteVoiceToggle,
     handleToggleSpeakRepliesOnThisDevice,
     isRemoteRecording,
     isRemoteTranscribing,
     isReplyAudioPlaying,
     latestReplyAudioUrl,
+    pendingVoiceReview,
     playReplyAudio,
     remoteRecordingElapsedLabel,
     remoteVoiceCapability,
@@ -270,7 +291,7 @@ function App() {
     }
 
     setSending(true);
-    setChatStatus("Processing host action approval...");
+    setChatStatus("Processing approval...");
     try {
       const response = await respondToApproval({ decision, conversationId });
       const nextConversationId = response.conversation_id ?? conversationId;
@@ -412,6 +433,7 @@ function App() {
       remoteVoiceDisabledReason={remoteVoiceCapability.reason}
       remoteVoicePressToTalk={remoteVoicePressToTalk}
       remoteVoiceStatus={remoteVoiceStatus}
+      pendingVoiceReview={pendingVoiceReview}
       replyAudioStatus={replyAudioStatus}
       scheduledReminderCount={scheduledReminderCount}
       selectedBackend={host.selectedBackend}
@@ -442,6 +464,7 @@ function App() {
         setIsSettingsOpen(true);
       }}
       onPlayLatestReplyAudio={() => void handlePlayLatestReplyAudio()}
+      onDismissVoiceReview={handleDismissPendingVoiceReview}
       onProfileChange={setProfile}
       onReconnectHost={() => void host.handleReconnectHost()}
       onRefreshLlmSettings={() => void host.handleRefreshLlmSettings()}
@@ -470,6 +493,9 @@ function App() {
       onToggleRemoteVoice={() => void handleRemoteVoiceToggle()}
       onToggleSpeakRepliesOnThisDevice={handleToggleSpeakRepliesOnThisDevice}
       onReasoningEffortChange={setReasoningEffort}
+      onRetryVoiceReview={() => void handleRetryPendingVoiceReview()}
+      onSendHeardVoiceReview={() => void handleSendReviewedVoiceTranscript("heard")}
+      onUseSuggestedVoiceReview={() => void handleSendReviewedVoiceTranscript("suggested")}
     />
   );
 }

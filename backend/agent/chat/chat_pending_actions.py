@@ -18,6 +18,10 @@ def maybe_handle_pending_confirmation_impl(
     clear_pending_host_approval,
     grant_host_action_trust,
     execute_pending_host_approval,
+    get_pending_host_task,
+    clear_pending_host_task,
+    build_host_task_payload,
+    execute_pending_host_task,
     log_agent_action_event,
     get_pending_calendar_action,
     clear_pending_calendar_action,
@@ -26,9 +30,9 @@ def maybe_handle_pending_confirmation_impl(
     update_calendar_event_fields,
     calendar_field_update_success_reply,
 ):
+    normalized = normalize_confirmation_text(text)
     host_pending = get_pending_host_approval(conversation_id)
     if host_pending is not None:
-        normalized = normalize_confirmation_text(text)
         if normalized in cancel_patterns:
             log_agent_action_event(
                 conversation_id=conversation_id,
@@ -181,11 +185,50 @@ def maybe_handle_pending_confirmation_impl(
                 client_session_id=client_session_id,
             )
 
+    task_pending = get_pending_host_task(conversation_id)
+    if task_pending is not None:
+        if normalized in cancel_patterns:
+            log_agent_action_event(
+                conversation_id=conversation_id,
+                event_kind="denied",
+                action_kind="host_task",
+                risk_level=task_pending.risk_level,
+                access_mode="approve_risky",
+                title=task_pending.title,
+                summary=task_pending.summary,
+                client_session_id=client_session_id,
+                detail="User denied the pending host task.",
+            )
+            update_latest_tool_turn(
+                conversation_id=conversation_id,
+                tool_kind="task_request",
+                tool_payload=build_host_task_payload(
+                    task_pending,
+                    access_mode="approve_risky",
+                    status="denied",
+                    can_approve=False,
+                ),
+                message=f"Declined task: {task_pending.title}",
+            )
+            clear_pending_host_task(conversation_id)
+            return ToolChatResponse(
+                handled=True,
+                reply="Okay, I canceled that pending host task.",
+                active_domain="workspace",
+            )
+
+        if normalized in confirm_patterns or normalized == "approve":
+            clear_pending_host_task(conversation_id)
+            return execute_pending_host_task(
+                task_pending,
+                conversation_id=conversation_id,
+                client_session_id=client_session_id,
+            )
+
     pending = get_pending_calendar_action(conversation_id)
     if pending is None:
         return ToolChatResponse(handled=False)
 
-    normalized = normalize_confirmation_text(text)
     if normalized in cancel_patterns:
         clear_pending_calendar_action(conversation_id)
         return ToolChatResponse(handled=True, reply="Okay, I canceled that pending calendar change.")

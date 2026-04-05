@@ -1,5 +1,16 @@
 export type ChatMode = "voice_fast" | "chat_balanced" | "agent_strong";
 export type AgentAccessMode = "read_only" | "approve_risky" | "full_access";
+export type VoiceTranscriptConfidenceLevel = "high" | "medium" | "low";
+export type VoiceTranscriptReviewAction = "accept" | "confirm" | "repeat";
+
+export interface VoiceTranscriptReview {
+  confidence_level: VoiceTranscriptConfidenceLevel;
+  confidence_score: number;
+  action: VoiceTranscriptReviewAction;
+  suggested_text?: string | null;
+  clarification_message?: string | null;
+  review_reason?: string | null;
+}
 
 export interface WeatherToolPayload {
   location_query: string;
@@ -45,6 +56,33 @@ export interface ApprovalRequestToolPayload {
   preview_block?: string | null;
 }
 
+export interface HostTaskStepPayload {
+  step_id: string;
+  title: string;
+  action_kind: string;
+  risk_level: string;
+  status: string;
+  append?: boolean | null;
+  path?: string | null;
+  query?: string | null;
+  command?: string | null;
+  detail?: string | null;
+  preview_block?: string | null;
+}
+
+export interface TaskRequestToolPayload {
+  status: string;
+  title: string;
+  summary: string;
+  risk_level: string;
+  access_mode: AgentAccessMode | string;
+  can_approve: boolean;
+  details: string[];
+  steps: HostTaskStepPayload[];
+  total_steps?: number;
+  completed_steps?: number;
+}
+
 export interface ConversationSummary {
   id: number;
   title: string;
@@ -57,7 +95,7 @@ export interface ConversationTurn {
   role: "user" | "assistant" | string;
   message: string;
   tool_kind?: string | null;
-  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | Record<string, unknown> | null;
+  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | TaskRequestToolPayload | Record<string, unknown> | null;
 }
 
 export interface WorkspaceBootstrapResponse {
@@ -79,11 +117,12 @@ export interface ChatResponse {
   conversation_id: number | null;
   tts_url?: string | null;
   tool_kind?: string | null;
-  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | Record<string, unknown> | null;
+  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | TaskRequestToolPayload | Record<string, unknown> | null;
 }
 
 export interface TranscribeResponse {
   transcribed_text: string;
+  review?: VoiceTranscriptReview | null;
 }
 
 export interface ReminderItem {
@@ -141,12 +180,15 @@ export interface StatusResponse {
 
 export interface LiveSnapshot {
   seq: number | null;
+  rev?: number | null;
   transcript: string | null;
   reply: string | null;
   recording: boolean;
   processing: boolean;
   utter_ms: number | null;
   cycle_ms: number | null;
+  event_kind?: string | null;
+  event_conversation_id?: number | null;
   utter_ts?: string | null;
   reply_ts?: string | null;
   tts_url?: string | null;

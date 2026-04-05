@@ -14,7 +14,7 @@ import type {
   StatusResponse,
   UserProfilePayload,
 } from "../lib/types";
-import type { ConnectionState, RemoteVoiceDiagnostics, SendSource } from "../lib/runtime";
+import type { ConnectionState, PendingVoiceReview, RemoteVoiceDiagnostics, SendSource } from "../lib/runtime";
 import type { InspectorSection, ReasoningEffort } from "../lib/ui";
 
 type AppWorkspaceShellProps = {
@@ -71,6 +71,7 @@ type AppWorkspaceShellProps = {
   remoteVoiceDisabledReason: string;
   remoteVoicePressToTalk: boolean;
   remoteVoiceStatus: string;
+  pendingVoiceReview: PendingVoiceReview | null;
   replyAudioStatus: string;
   scheduledReminderCount: number;
   selectedBackend: string;
@@ -101,6 +102,7 @@ type AppWorkspaceShellProps = {
   onOpenConversationSidebar: () => void;
   onOpenSettings: () => void;
   onPlayLatestReplyAudio: () => void;
+  onDismissVoiceReview: () => void;
   onReconnectHost: () => void;
   onRefreshAgentActionLog: () => void;
   onRefreshLlmSettings: () => void;
@@ -128,6 +130,9 @@ type AppWorkspaceShellProps = {
   onSendTestNotification: () => void;
   onProfileChange: (updater: (current: UserProfilePayload) => UserProfilePayload) => void;
   onAgentAccessModeChange: (value: AgentAccessMode) => void;
+  onRetryVoiceReview: () => void;
+  onSendHeardVoiceReview: () => void;
+  onUseSuggestedVoiceReview: () => void;
 };
 
 export function AppWorkspaceShell({
@@ -186,6 +191,7 @@ export function AppWorkspaceShell({
   remoteVoiceDisabledReason,
   remoteVoicePressToTalk,
   remoteVoiceStatus,
+  pendingVoiceReview,
   replyAudioStatus,
   scheduledReminderCount,
   selectedBackend,
@@ -215,6 +221,7 @@ export function AppWorkspaceShell({
   onOpenConversationSidebar,
   onOpenSettings,
   onPlayLatestReplyAudio,
+  onDismissVoiceReview,
   onProfileChange,
   onReconnectHost,
   onRefreshAgentActionLog,
@@ -241,6 +248,9 @@ export function AppWorkspaceShell({
   onToggleRemoteVoice,
   onToggleSpeakRepliesOnThisDevice,
   onReasoningEffortChange,
+  onRetryVoiceReview,
+  onSendHeardVoiceReview,
+  onUseSuggestedVoiceReview,
 }: AppWorkspaceShellProps) {
   return (
     <main className={`app-shell ${isMobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
@@ -310,6 +320,7 @@ export function AppWorkspaceShell({
           remoteVoiceBusy={isRemoteTranscribing}
           remoteVoiceDisabledReason={remoteVoiceDisabledReason}
           remoteVoiceStatus={remoteVoiceStatus}
+          pendingVoiceReview={pendingVoiceReview}
           isRemoteRecording={isRemoteRecording}
           remoteRecordingElapsedLabel={remoteRecordingElapsedLabel}
           remoteVoicePressToTalk={remoteVoicePressToTalk}
@@ -319,10 +330,14 @@ export function AppWorkspaceShell({
           onRemoteVoicePressEnd={onRemoteVoicePressEnd}
           onRemoteVoicePressCancel={onRemoteVoicePressCancel}
           onPlayLatestReplyAudio={onPlayLatestReplyAudio}
+          onDismissVoiceReview={onDismissVoiceReview}
           onToggleSpeakRepliesOnThisDevice={onToggleSpeakRepliesOnThisDevice}
           onReconnectHost={onReconnectHost}
           onOpenConversationSidebar={onOpenConversationSidebar}
           onOpenSettings={onOpenSettings}
+          onRetryVoiceReview={onRetryVoiceReview}
+          onSendHeardVoiceReview={onSendHeardVoiceReview}
+          onUseSuggestedVoiceReview={onUseSuggestedVoiceReview}
         />
       </section>
 

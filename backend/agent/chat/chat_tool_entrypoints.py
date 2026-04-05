@@ -92,6 +92,7 @@ def maybe_handle_natural_language_tool_request_impl(
     maybe_handle_brief_request,
     maybe_handle_reminder_request,
     maybe_calendar_tool_response,
+    maybe_host_task_response,
     maybe_workspace_tool_response,
     maybe_research_tool_response,
     calendar_details_re,
@@ -163,6 +164,15 @@ def maybe_handle_natural_language_tool_request_impl(
     calendar_reply = maybe_calendar_tool_response(message, conversation_id=conversation_id)
     if calendar_reply is not None:
         return calendar_reply
+
+    task_reply = maybe_host_task_response(
+        message,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+        agent_access_mode=agent_access_mode,
+    )
+    if task_reply is not None:
+        return task_reply
 
     workspace_reply = maybe_workspace_tool_response(
         message,

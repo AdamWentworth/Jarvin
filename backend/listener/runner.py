@@ -15,6 +15,7 @@ from backend.listener.live_state import set_snapshot, set_status
 from backend.listener.loop import AudioLoop
 from backend.core.pipeline import process_utterance
 from backend.asr import WhisperASR
+from backend.agent.voice.voice_listener_clarification_state import clear_listener_voice_review_state
 
 log = logging.getLogger("jarvin")
 
@@ -27,6 +28,7 @@ async def _watch_stop_event(stop_event: asyncio.Event, loop: AudioLoop) -> None:
 
 async def run_listener(stop_event: asyncio.Event, initial_delay: float = 0.2) -> None:
     s = cfg.settings
+    clear_listener_voice_review_state()
 
     if initial_delay > 0:
         try:
@@ -176,4 +178,5 @@ async def run_listener(stop_event: asyncio.Event, initial_delay: float = 0.2) ->
                 stopper_task.cancel()
         except Exception:
             pass
+        clear_listener_voice_review_state()
         set_status(recording=False, processing=False)

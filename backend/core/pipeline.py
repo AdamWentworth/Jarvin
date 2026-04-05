@@ -10,6 +10,7 @@ from backend.core.ports import ASRTranscriber, LLMChatEngine, AudioSink
 from audio.wav_io import write_wav_int16_mono as _write_wav_int16_mono
 from backend.util.paths import temp_unique_path
 from backend.ai_engine import JarvinConfig, build_context, build_jarvin_config
+from backend.agent.voice.voice_listener_clarification_state import resolve_listener_voice_review
 from backend.asr.whisper import WhisperASR
 from backend.llm.runtime_local import LocalChat
 from backend.tts.engine import synth_to_wav
@@ -85,7 +86,7 @@ def process_utterance(
         llm = _LLMWithCfg(LocalChat(), cfg_ai)
 
     t0 = time.perf_counter()
-    text = _transcribe_with_best_path(
+    raw_text = _transcribe_with_best_path(
         asr,
         pcm=pcm,
         sample_rate=sr,
@@ -95,21 +96,27 @@ def process_utterance(
     ).strip()
     t_trans_ms = int((time.perf_counter() - t0) * 1000)
 
+    review_decision = resolve_listener_voice_review(raw_text)
+    text = review_decision.transcript_for_display or raw_text
+    acted_text = (review_decision.acted_text or "").strip()
     reply = ""
     t_reply_ms = 0
     tts_path: Optional[str] = None
-    if text:
+    if review_decision.spoken_reply:
+        reply = review_decision.spoken_reply
+    elif acted_text:
         # Build compact context for the LLM from in-process memory
         profile = get_user_profile()
         history = get_conversation_history()
         ctx = build_context(profile=profile, history=history, max_turns=cfg_ai.history_window)
 
         t1 = time.perf_counter()
-        reply = llm.reply(text, context=ctx) or ""
+        reply = llm.reply(acted_text, context=ctx) or ""
         t_reply_ms = int((time.perf_counter() - t1) * 1000)
 
         # Persist this turn for future context
-        append_turn("user", text)
+        if review_decision.should_persist_turn:
+            append_turn("user", acted_text)
         if reply:
             append_turn("assistant", reply)
 

@@ -16,6 +16,7 @@ import {
   shutdownHost,
   startListener,
   stopListener,
+  subscribeToLiveStream,
   getWorkspaceBootstrap,
 } from "../lib/api";
 import type {
@@ -38,6 +39,7 @@ type UseJarvinHostOptions = {
   onWorkspaceSync: (workspace: WorkspacePayload | ConversationWorkspacePayload) => void;
   reportError: (message: string) => void;
   sending: boolean;
+  shouldPollConversation: boolean;
 };
 
 export function useJarvinHost({
@@ -46,6 +48,7 @@ export function useJarvinHost({
   onWorkspaceSync,
   reportError,
   sending,
+  shouldPollConversation,
 }: UseJarvinHostOptions) {
   const describeErrorRef = useRef(describeError);
   const onWorkspaceSyncRef = useRef(onWorkspaceSync);
@@ -73,13 +76,25 @@ export function useJarvinHost({
   const [agentActionLog, setAgentActionLog] = useState<AgentActionLogItem[]>([]);
   const [agentActionLogStatus, setAgentActionLogStatus] = useState("");
   const lastLiveSeq = useRef<number | null>(null);
+  const lastLiveRev = useRef<number | null>(null);
   const consecutivePollFailuresRef = useRef(0);
+  const conversationRefreshInFlightRef = useRef(false);
+  const liveStreamConnectedRef = useRef(false);
+  const activeConversationIdRef = useRef(activeConversationId);
+  const sendingRef = useRef(sending);
+  const shouldPollConversationRef = useRef(shouldPollConversation);
 
   useEffect(() => {
     describeErrorRef.current = describeError;
     onWorkspaceSyncRef.current = onWorkspaceSync;
     reportErrorRef.current = reportError;
   }, [describeError, onWorkspaceSync, reportError]);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+    sendingRef.current = sending;
+    shouldPollConversationRef.current = shouldPollConversation;
+  }, [activeConversationId, sending, shouldPollConversation]);
 
   const currentListenerStatus = useMemo(
     () => statusLabel(status, live),
@@ -115,6 +130,71 @@ export function useJarvinHost({
     return selectedBackend === "ollama_http" ? llmOptions.ollama_model_choices : llmOptions.local_model_choices;
   }, [llmOptions, selectedBackend]);
 
+  function applyLiveSnapshot(snapshot: LiveSnapshot, options?: { updateContact?: boolean }) {
+    const updateContact = options?.updateContact ?? true;
+    setLive(snapshot);
+    lastLiveSeq.current = snapshot.seq ?? null;
+    lastLiveRev.current = snapshot.rev ?? null;
+    if (updateContact) {
+      setConnectionState("connected");
+      setLastConnectionError("");
+      setLastSuccessfulContactAt(new Date().toISOString());
+    }
+  }
+
+  async function refreshActiveConversation(options?: { refreshActionLog?: boolean }) {
+    const conversationId = activeConversationIdRef.current;
+    if (conversationId === null || sendingRef.current || conversationRefreshInFlightRef.current) {
+      return;
+    }
+
+    conversationRefreshInFlightRef.current = true;
+    try {
+      const workspace = await activateConversation(conversationId);
+      onWorkspaceSyncRef.current(workspace);
+      if (options?.refreshActionLog) {
+        void refreshAgentActionLog(conversationId);
+      }
+    } finally {
+      conversationRefreshInFlightRef.current = false;
+    }
+  }
+
+  async function handleIncomingLiveSnapshot(snapshot: LiveSnapshot, options?: { updateContact?: boolean }) {
+    const updateContact = options?.updateContact ?? true;
+    const nextRev = snapshot.rev ?? null;
+    if (nextRev !== null && nextRev === lastLiveRev.current) {
+      return;
+    }
+
+    const previousSeq = lastLiveSeq.current;
+    applyLiveSnapshot(snapshot, { updateContact });
+
+    const eventConversationId =
+      typeof snapshot.event_conversation_id === "number" ? snapshot.event_conversation_id : null;
+    const activeConversationId = activeConversationIdRef.current;
+    const eventMatchesActiveConversation =
+      activeConversationId !== null &&
+      (eventConversationId === null || eventConversationId === activeConversationId);
+    const sequenceChanged = snapshot.seq !== null && snapshot.seq !== previousSeq;
+    const shouldRefreshConversation =
+      eventMatchesActiveConversation &&
+      !sendingRef.current &&
+      (sequenceChanged ||
+        shouldPollConversationRef.current ||
+        snapshot.event_kind === "conversation" ||
+        snapshot.event_kind === "agent_action");
+
+    if (shouldRefreshConversation) {
+      await refreshActiveConversation({ refreshActionLog: true });
+      return;
+    }
+
+    if (snapshot.event_kind === "agent_action" && eventMatchesActiveConversation) {
+      void refreshAgentActionLog(activeConversationId);
+    }
+  }
+
   async function refreshWorkspace(options?: { withLoading?: boolean; reason?: "initial" | "manual" | "reconnect" }) {
     const withLoading = options?.withLoading ?? true;
     const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -142,8 +222,7 @@ export function useJarvinHost({
       setSelectedDeviceIndex(devices.selected_index ?? "");
       setHealth(currentHealth);
       setStatus(currentStatus);
-      setLive(currentLive);
-      lastLiveSeq.current = currentLive.seq ?? null;
+      applyLiveSnapshot(currentLive, { updateContact: false });
       setApiBaseUrlStatus("");
       setConnectionState("connected");
       setLastConnectionError("");
@@ -206,36 +285,74 @@ export function useJarvinHost({
   }, []);
 
   useEffect(() => {
+    if (!isClientOnline) {
+      liveStreamConnectedRef.current = false;
+      return undefined;
+    }
+
+    let cleanup = () => {};
+    try {
+      cleanup = subscribeToLiveStream({
+        onOpen: () => {
+          liveStreamConnectedRef.current = true;
+          consecutivePollFailuresRef.current = 0;
+          setConnectionState("connected");
+          setLastConnectionError("");
+          setLastSuccessfulContactAt(new Date().toISOString());
+        },
+        onMessage: (snapshot) => {
+          void handleIncomingLiveSnapshot(snapshot);
+        },
+        onError: (error) => {
+          liveStreamConnectedRef.current = false;
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Live stream interrupted. Falling back to direct polling while it reconnects.";
+          setLastConnectionError(message);
+          setConnectionState("degraded");
+        },
+      });
+    } catch (error) {
+      liveStreamConnectedRef.current = false;
+      setLastConnectionError(describeErrorRef.current(error));
+      setConnectionState("degraded");
+    }
+
+    return () => {
+      liveStreamConnectedRef.current = false;
+      cleanup();
+    };
+  }, [apiBaseUrl, isClientOnline]);
+
+  useEffect(() => {
     const poll = window.setInterval(async () => {
       try {
         const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-        const [currentHealth, currentStatus, currentLive] = await Promise.all([getHealth(), getStatus(), getLive()]);
+        const [currentHealth, currentStatus] = await Promise.all([getHealth(), getStatus()]);
         setHealth(currentHealth);
         setStatus(currentStatus);
-        setLive(currentLive);
-        setConnectionState("connected");
-        setLastConnectionError("");
-        setLastSuccessfulContactAt(new Date().toISOString());
         setLastRoundTripMs(Math.max(1, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)));
-        consecutivePollFailuresRef.current = 0;
 
-        const nextSeq = currentLive.seq ?? null;
-        if (nextSeq !== null && nextSeq !== lastLiveSeq.current && activeConversationId !== null && !sending) {
-          lastLiveSeq.current = nextSeq;
-          const workspace = await activateConversation(activeConversationId);
-          onWorkspaceSyncRef.current(workspace);
+        if (!liveStreamConnectedRef.current) {
+          const currentLive = await getLive();
+          await handleIncomingLiveSnapshot(currentLive);
         } else {
-          lastLiveSeq.current = nextSeq;
+          setConnectionState("connected");
+          setLastConnectionError("");
+          setLastSuccessfulContactAt(new Date().toISOString());
         }
+
+        consecutivePollFailuresRef.current = 0;
       } catch (error) {
         consecutivePollFailuresRef.current += 1;
         setLastConnectionError(describeErrorRef.current(error));
         setConnectionState(consecutivePollFailuresRef.current >= 3 ? "offline" : "degraded");
       }
-    }, 1000);
+    }, 5000);
 
     return () => window.clearInterval(poll);
-  }, [activeConversationId, sending]);
+  }, []);
 
   async function handleReconnectHost() {
     setApiBaseUrlStatus("Reconnecting to the Jarvin host...");

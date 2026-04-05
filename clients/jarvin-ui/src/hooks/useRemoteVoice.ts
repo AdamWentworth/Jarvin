@@ -11,6 +11,7 @@ import {
   REMOTE_RECORDING_LIMIT_SECONDS,
   setStoredSpeakRepliesPreference,
   stopRemoteStream,
+  type PendingVoiceReview,
   type RemoteVoiceDiagnostics,
   type SendSource,
   withRecorderStop,
@@ -31,6 +32,7 @@ export function useRemoteVoice({ describeError, onSendMessage }: UseRemoteVoiceO
   const [isRemoteRecording, setIsRemoteRecording] = useState(false);
   const [isRemoteTranscribing, setIsRemoteTranscribing] = useState(false);
   const [remoteRecordingSeconds, setRemoteRecordingSeconds] = useState(0);
+  const [pendingVoiceReview, setPendingVoiceReview] = useState<PendingVoiceReview | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -197,6 +199,7 @@ export function useRemoteVoice({ describeError, onSendMessage }: UseRemoteVoiceO
 
     try {
       stopReplyAudio({ quiet: true });
+      setPendingVoiceReview(null);
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -216,6 +219,7 @@ export function useRemoteVoice({ describeError, onSendMessage }: UseRemoteVoiceO
         setIsRemoteRecording(false);
         mediaRecorderRef.current = null;
         mediaChunksRef.current = [];
+        setPendingVoiceReview(null);
         stopRemoteStream(mediaStreamRef);
       };
 
@@ -229,6 +233,7 @@ export function useRemoteVoice({ describeError, onSendMessage }: UseRemoteVoiceO
           setIsRemoteTranscribing,
           setRemoteVoiceStatus,
           setRemoteVoiceDiagnostics,
+          setPendingVoiceReview,
           sendMessage: (text) => onSendMessage(text, "remote_voice"),
         });
       };
@@ -275,6 +280,58 @@ export function useRemoteVoice({ describeError, onSendMessage }: UseRemoteVoiceO
       setRemoteVoiceDiagnostics((current) => ({ ...current, note: describeError(error) }));
       setRemoteVoiceStatus(describeError(error) || "Microphone permission was denied.");
     }
+  }
+
+  async function handleSendReviewedVoiceTranscript(mode: "suggested" | "heard") {
+    if (!pendingVoiceReview) {
+      return;
+    }
+
+    const selectedText =
+      mode === "suggested" && pendingVoiceReview.review.suggested_text
+        ? pendingVoiceReview.review.suggested_text
+        : pendingVoiceReview.heardText;
+    const reviewSnapshot = pendingVoiceReview;
+    setPendingVoiceReview(null);
+    setRemoteVoiceStatus(`Sending: ${selectedText}`);
+    setRemoteVoiceDiagnostics((current) => ({
+      ...current,
+      chat: "working",
+      note: "Sending the reviewed voice transcript to the Jarvin host.",
+    }));
+
+    try {
+      await onSendMessage(selectedText, "remote_voice");
+    } catch (error) {
+      setPendingVoiceReview(reviewSnapshot);
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        chat: "error",
+        note: describeError(error),
+      }));
+      setRemoteVoiceStatus(describeError(error) || "Could not send the reviewed voice transcript.");
+    }
+  }
+
+  async function handleRetryPendingVoiceReview() {
+    setPendingVoiceReview(null);
+    setRemoteVoiceStatus("Okay, try saying that again.");
+    setRemoteVoiceDiagnostics((current) => ({
+      ...current,
+      chat: "idle",
+      note: "Voice review dismissed. Ready to listen again.",
+    }));
+    await beginRemoteRecording();
+  }
+
+  function handleDismissPendingVoiceReview() {
+    setPendingVoiceReview(null);
+    setRemoteVoiceStatus("Voice review dismissed. Nothing was sent.");
+    setRemoteVoiceDiagnostics((current) => ({
+      ...current,
+      chat: "idle",
+      note: "Voice review dismissed. Nothing was sent to Jarvin.",
+    }));
   }
 
   function finishRemoteRecording() {
@@ -369,16 +426,20 @@ export function useRemoteVoice({ describeError, onSendMessage }: UseRemoteVoiceO
 
   return {
     beginRemoteRecording,
+    handleDismissPendingVoiceReview,
     handlePlayLatestReplyAudio,
     handleRemoteVoicePressCancel,
     handleRemoteVoicePressEnd,
     handleRemoteVoicePressStart,
+    handleRetryPendingVoiceReview,
+    handleSendReviewedVoiceTranscript,
     handleRemoteVoiceToggle,
     handleToggleSpeakRepliesOnThisDevice,
     isRemoteRecording,
     isRemoteTranscribing,
     isReplyAudioPlaying,
     latestReplyAudioUrl,
+    pendingVoiceReview,
     playReplyAudio,
     remoteRecordingElapsedLabel,
     remoteVoiceCapability,

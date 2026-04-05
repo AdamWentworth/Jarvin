@@ -1,9 +1,11 @@
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Bars3Icon, Cog6ToothIcon, MicrophoneIcon, SpeakerWaveIcon, StopIcon } from "@heroicons/react/20/solid";
-import type { ApprovalRequestToolPayload, Choice, ConversationTurn, WeatherToolPayload } from "../lib/types";
+import type { ApprovalRequestToolPayload, Choice, ConversationTurn, TaskRequestToolPayload, WeatherToolPayload } from "../lib/types";
 import type { ReasoningEffort } from "../lib/ui";
-import type { ConnectionState } from "../lib/runtime";
+import type { ConnectionState, PendingVoiceReview } from "../lib/runtime";
 import { ApprovalRequestCard } from "./ApprovalRequestCard";
+import { TaskRequestCard } from "./TaskRequestCard";
+import { VoiceTranscriptionReviewCard } from "./VoiceTranscriptionReviewCard";
 import { WeatherMessageCard } from "./WeatherMessageCard";
 
 type ChatWorkspaceProps = {
@@ -30,6 +32,7 @@ type ChatWorkspaceProps = {
   remoteVoiceBusy: boolean;
   remoteVoiceDisabledReason: string;
   remoteVoiceStatus: string;
+  pendingVoiceReview: PendingVoiceReview | null;
   isRemoteRecording: boolean;
   remoteRecordingElapsedLabel: string;
   remoteVoicePressToTalk: boolean;
@@ -52,10 +55,14 @@ type ChatWorkspaceProps = {
   onRemoteVoicePressEnd: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onRemoteVoicePressCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPlayLatestReplyAudio: () => void;
+  onDismissVoiceReview: () => void;
   onToggleSpeakRepliesOnThisDevice: () => void;
   onReconnectHost: () => void;
   onOpenSettings: () => void;
   onOpenConversationSidebar: () => void;
+  onRetryVoiceReview: () => void;
+  onSendHeardVoiceReview: () => void;
+  onUseSuggestedVoiceReview: () => void;
 };
 
 export function ChatWorkspace({
@@ -82,6 +89,7 @@ export function ChatWorkspace({
   remoteVoiceBusy,
   remoteVoiceDisabledReason,
   remoteVoiceStatus,
+  pendingVoiceReview,
   isRemoteRecording,
   remoteRecordingElapsedLabel,
   remoteVoicePressToTalk,
@@ -104,10 +112,14 @@ export function ChatWorkspace({
   onRemoteVoicePressEnd,
   onRemoteVoicePressCancel,
   onPlayLatestReplyAudio,
+  onDismissVoiceReview,
   onToggleSpeakRepliesOnThisDevice,
   onReconnectHost,
   onOpenSettings,
   onOpenConversationSidebar,
+  onRetryVoiceReview,
+  onSendHeardVoiceReview,
+  onUseSuggestedVoiceReview,
 }: ChatWorkspaceProps) {
   function weatherPayloadForTurn(turn: ConversationTurn): WeatherToolPayload | null {
     if (turn.tool_kind !== "weather" || !turn.tool_payload) {
@@ -121,6 +133,13 @@ export function ChatWorkspace({
       return null;
     }
     return turn.tool_payload as ApprovalRequestToolPayload;
+  }
+
+  function taskPayloadForTurn(turn: ConversationTurn): TaskRequestToolPayload | null {
+    if (turn.tool_kind !== "task_request" || !turn.tool_payload) {
+      return null;
+    }
+    return turn.tool_payload as TaskRequestToolPayload;
   }
 
   return (
@@ -183,7 +202,8 @@ export function ChatWorkspace({
             history.map((turn, index) => {
               const weatherPayload = weatherPayloadForTurn(turn);
               const approvalPayload = approvalPayloadForTurn(turn);
-              const hasToolCard = Boolean(weatherPayload || approvalPayload);
+              const taskPayload = taskPayloadForTurn(turn);
+              const hasToolCard = Boolean(weatherPayload || approvalPayload || taskPayload);
 
               return (
                 <article
@@ -204,6 +224,14 @@ export function ChatWorkspace({
                         onTrustSession={onTrustPendingSession}
                       />
                     ) : null}
+                    {taskPayload ? (
+                      <TaskRequestCard
+                        payload={taskPayload}
+                        sending={sending}
+                        onApprove={onApprovePendingAction}
+                        onDeny={onDenyPendingAction}
+                      />
+                    ) : null}
                   </div>
                 </article>
               );
@@ -222,6 +250,17 @@ export function ChatWorkspace({
                 Reconnect
               </button>
             </div>
+          ) : null}
+
+          {pendingVoiceReview ? (
+            <VoiceTranscriptionReviewCard
+              review={pendingVoiceReview}
+              sending={sending}
+              onUseSuggestion={onUseSuggestedVoiceReview}
+              onSendHeard={onSendHeardVoiceReview}
+              onRetry={onRetryVoiceReview}
+              onDismiss={onDismissVoiceReview}
+            />
           ) : null}
 
           {chatStatus || remoteVoiceStatus || replyAudioStatus || latestReplyAudioReady ? (

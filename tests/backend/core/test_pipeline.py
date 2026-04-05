@@ -98,3 +98,89 @@ def test_process_utterance_falls_back_to_wav_path_asr(monkeypatch):
     assert asr.paths == [wav_path]
     assert len(sink.calls) == 1
     assert sink.calls[0][0] == wav_path
+
+
+def test_process_utterance_asks_for_repeat_without_generating_reply(monkeypatch):
+    _patch_pipeline_side_effects(monkeypatch)
+    sink = _FakeSink()
+    asr = _PCMFirstASR()
+    llm_calls: list[str] = []
+
+    class _TrackingLLM:
+        def reply(self, user_text: str, *, context: str | None = None) -> str:
+            llm_calls.append(user_text)
+            return "should not happen"
+
+    monkeypatch.setattr(
+        pipeline,
+        "resolve_listener_voice_review",
+        lambda _text: type(
+            "Decision",
+            (),
+            {
+                "acted_text": None,
+                "spoken_reply": "Please repeat that.",
+                "transcript_for_display": "Metro Hound",
+                "should_persist_turn": False,
+                "review_action": "repeat",
+            },
+        )(),
+    )
+
+    text, reply, timings, wav_path, tts_path = pipeline.process_utterance(
+        np.array([0, 1000, -1000, 2000], dtype=np.int16),
+        16000,
+        asr=asr,
+        llm=_TrackingLLM(),
+        audio_sink=sink,
+    )
+
+    assert text == "Metro Hound"
+    assert reply == "Please repeat that."
+    assert timings["reply_ms"] == 0
+    assert wav_path.endswith("live_utt_test.wav")
+    assert tts_path is None
+    assert llm_calls == []
+
+
+def test_process_utterance_uses_confirmed_candidate_text(monkeypatch):
+    appended: list[tuple[str, str]] = []
+    monkeypatch.setattr(pipeline, "temp_unique_path", lambda prefix, suffix: str(Path("temp") / "live_utt_test.wav"))
+    monkeypatch.setattr(pipeline, "get_user_profile", lambda: {})
+    monkeypatch.setattr(pipeline, "get_conversation_history", lambda: [])
+    monkeypatch.setattr(pipeline, "append_turn", lambda role, text: appended.append((role, text)))
+    monkeypatch.setattr(pipeline, "synth_to_wav", lambda text: None)
+    monkeypatch.setattr(
+        pipeline,
+        "resolve_listener_voice_review",
+        lambda _text: type(
+            "Decision",
+            (),
+            {
+                "acted_text": "Burnaby near Metrotown",
+                "spoken_reply": None,
+                "transcript_for_display": "Burnaby near Metrotown",
+                "should_persist_turn": True,
+                "review_action": "accept",
+            },
+        )(),
+    )
+
+    class _TrackingLLM:
+        def reply(self, user_text: str, *, context: str | None = None) -> str:
+            return f"handled:{user_text}"
+
+    text, reply, _timings, _wav_path, _tts_path = pipeline.process_utterance(
+        np.array([0, 1000, -1000, 2000], dtype=np.int16),
+        16000,
+        asr=_PCMFirstASR(),
+        llm=_TrackingLLM(),
+        audio_sink=_FakeSink(),
+    )
+
+    assert text == "Burnaby near Metrotown"
+    assert reply == "handled:Burnaby near Metrotown"
+    assert appended == [
+        ("user", "Burnaby near Metrotown"),
+        ("assistant", "handled:Burnaby near Metrotown"),
+    ]

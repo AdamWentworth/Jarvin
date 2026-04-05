@@ -193,6 +193,43 @@ export function getLive() {
   return requestJson<LiveSnapshot>("/live");
 }
 
+export function subscribeToLiveStream(handlers: {
+  onMessage: (snapshot: LiveSnapshot) => void;
+  onError?: (error: Event | Error) => void;
+  onOpen?: () => void;
+}): () => void {
+  if (typeof window === "undefined" || typeof window.EventSource === "undefined") {
+    throw new Error("Server-sent events are not supported in this environment.");
+  }
+
+  const source = new window.EventSource(buildApiUrl("/live/stream"));
+  source.onopen = () => handlers.onOpen?.();
+  source.onerror = (event) => handlers.onError?.(event);
+  source.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data) as LiveSnapshot;
+      handlers.onMessage(payload);
+    } catch (error) {
+      handlers.onError?.(error instanceof Error ? error : new Error("Could not parse live stream payload."));
+    }
+  };
+
+  const liveHandler = (event: MessageEvent<string>) => {
+    try {
+      const payload = JSON.parse(event.data) as LiveSnapshot;
+      handlers.onMessage(payload);
+    } catch (error) {
+      handlers.onError?.(error instanceof Error ? error : new Error("Could not parse live stream payload."));
+    }
+  };
+  source.addEventListener("live", liveHandler as EventListener);
+
+  return () => {
+    source.removeEventListener("live", liveHandler as EventListener);
+    source.close();
+  };
+}
+
 export function startListener() {
   return requestJson<{ ok: boolean; message: string }>("/start", { method: "POST" });
 }

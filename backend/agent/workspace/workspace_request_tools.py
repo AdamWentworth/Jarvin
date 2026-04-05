@@ -43,6 +43,8 @@ class WorkspacePlan:
     start_line: int | None = None
     end_line: int | None = None
     command: str | None = None
+    content: str | None = None
+    append: bool = False
 
 
 @dataclass(frozen=True)

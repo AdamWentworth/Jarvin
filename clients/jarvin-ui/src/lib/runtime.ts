@@ -1,7 +1,7 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import { transcribeAudioBlob } from "./api";
-import type { AgentAccessMode } from "./types";
+import type { AgentAccessMode, VoiceTranscriptReview } from "./types";
 
 export type RemoteVoiceCapability = {
   available: boolean;
@@ -11,6 +11,11 @@ export type RemoteVoiceCapability = {
 export type ConnectionState = "connecting" | "connected" | "degraded" | "offline";
 export type PipelineStageState = "idle" | "working" | "done" | "error";
 export type SendSource = "typed" | "remote_voice";
+export type PendingVoiceReview = {
+  heardText: string;
+  candidateText: string;
+  review: VoiceTranscriptReview;
+};
 
 export type RemoteVoiceDiagnostics = {
   microphone: PipelineStageState;
@@ -198,6 +203,7 @@ export async function finalizeRemoteRecording({
   setIsRemoteTranscribing,
   setRemoteVoiceStatus,
   setRemoteVoiceDiagnostics,
+  setPendingVoiceReview,
   sendMessage,
 }: {
   mediaChunksRef: MutableRefObject<Blob[]>;
@@ -207,6 +213,7 @@ export async function finalizeRemoteRecording({
   setIsRemoteTranscribing: (value: boolean) => void;
   setRemoteVoiceStatus: (value: string) => void;
   setRemoteVoiceDiagnostics: Dispatch<SetStateAction<RemoteVoiceDiagnostics>>;
+  setPendingVoiceReview: (value: PendingVoiceReview | null) => void;
   sendMessage: (text: string) => Promise<void>;
 }) {
   const recorder = mediaRecorderRef.current;
@@ -256,8 +263,43 @@ export async function finalizeRemoteRecording({
       return;
     }
 
-    setRemoteVoiceStatus(`Heard: ${text}`);
-    await sendMessage(text);
+    const review = response.review ?? null;
+    const suggestedText = review?.suggested_text?.trim() ?? "";
+    const action = review?.action ?? "accept";
+
+    if (action === "confirm" || action === "repeat") {
+      const clarificationMessage =
+        review?.clarification_message?.trim() ||
+        (action === "repeat"
+          ? "That transcription does not look reliable enough to act on. Please repeat it."
+          : `I heard "${text}". Does that look right before I act on it?`);
+      setPendingVoiceReview({
+        heardText: text,
+        candidateText: suggestedText || text,
+        review: {
+          confidence_level: review?.confidence_level ?? "medium",
+          confidence_score: review?.confidence_score ?? (action === "repeat" ? 0.25 : 0.6),
+          action,
+          suggested_text: suggestedText || null,
+          clarification_message: clarificationMessage,
+          review_reason: review?.review_reason ?? null,
+        },
+      });
+      setRemoteVoiceDiagnostics((current) => ({
+        ...current,
+        chat: "idle",
+        note: clarificationMessage,
+      }));
+      setRemoteVoiceStatus(clarificationMessage);
+      return;
+    }
+
+    const messageText = suggestedText && suggestedText !== text ? suggestedText : text;
+    setPendingVoiceReview(null);
+    setRemoteVoiceStatus(
+      messageText === text ? `Heard: ${text}` : `Heard: ${text}. Using: ${messageText}`,
+    );
+    await sendMessage(messageText);
   } catch (error) {
     const message = error instanceof Error && error.message ? error.message : "Remote voice input failed.";
     setRemoteVoiceDiagnostics((current) => ({

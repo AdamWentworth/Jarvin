@@ -78,3 +78,41 @@ async def test_agent_approval_route_raises_conflict_when_nothing_is_pending(monk
 
     assert exc.value.status_code == 409
     assert "No pending approval matched" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_agent_approval_route_skips_persist_when_response_requests_it(monkeypatch):
+    captured = {"append": []}
+
+    monkeypatch.setattr(
+        agent_approvals_mod,
+        "maybe_handle_assistant_tool_request",
+        lambda text, conversation_id=None, client_session_id=None: type(
+            "ToolReply",
+            (),
+            {
+                "handled": True,
+                "reply": "Started `Check repo health`.",
+                "tool_kind": "task_request",
+                "tool_payload": {"status": "running", "title": "Check repo health"},
+                "persist_assistant_turn": False,
+            },
+        )(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        agent_approvals_mod,
+        "append_turn",
+        lambda role, message, conversation_id=None, **kwargs: captured["append"].append(
+            (role, message, conversation_id, kwargs)
+        ),
+        raising=True,
+    )
+
+    response = await agent_approvals_mod.respond_to_agent_approval(
+        ApprovalDecisionRequest(decision="approve", conversation_id=19)
+    )
+
+    assert response.reply == "Started `Check repo health`."
+    assert response.tool_kind == "task_request"
+    assert captured["append"] == []

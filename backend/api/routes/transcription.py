@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.api.schemas import TranscribeBytesRequest, TranscribeResponse
+from backend.agent.voice.voice_transcription_review import review_remote_transcription
 from backend.asr.whisper import transcribe_audio
 from backend.util.paths import ensure_temp_dir
 
@@ -88,7 +89,8 @@ def _transcribe_bytes(filename: str | None, content_type: str | None, data: byte
 async def transcribe_endpoint(audio_file: UploadFile = File(...)) -> TranscribeResponse:
     data = await audio_file.read()
     text = _transcribe_bytes(audio_file.filename, audio_file.content_type, data)
-    return TranscribeResponse(transcribed_text=text)
+    review = review_remote_transcription(text)
+    return TranscribeResponse(transcribed_text=text, review=review.to_payload())
 
 
 @router.post("/transcribe-bytes", response_model=TranscribeResponse)
@@ -99,4 +101,5 @@ async def transcribe_bytes_endpoint(payload: TranscribeBytesRequest) -> Transcri
         raise HTTPException(status_code=400, detail="invalid base64 audio payload") from exc
 
     text = _transcribe_bytes(payload.filename, payload.content_type, data)
-    return TranscribeResponse(transcribed_text=text)
+    review = review_remote_transcription(text)
+    return TranscribeResponse(transcribed_text=text, review=review.to_payload())

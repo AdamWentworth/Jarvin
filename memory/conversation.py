@@ -8,6 +8,7 @@ import threading
 from typing import Any, Dict, List, Tuple, Optional
 
 import config as cfg
+from backend.listener.live_state import notify_ui_update
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -372,6 +373,7 @@ def append_turn(
             """,
             (role, message, cid, tool_kind, payload_json),
         )
+    notify_ui_update(event_kind="conversation", conversation_id=cid)
 
 
 def update_latest_tool_turn(
@@ -413,7 +415,8 @@ def update_latest_tool_turn(
             f"UPDATE conversation_history SET {', '.join(updates)} WHERE id = ?;",
             tuple(params),
         )
-        return True
+    notify_ui_update(event_kind="conversation", conversation_id=cid)
+    return True
 
 
 def clear_conversation(conversation_id: Optional[int] = None) -> None:

@@ -8,8 +8,18 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VoiceTranscriptionReview(_StrictModel):
+    confidence_level: str = "high"
+    confidence_score: float = 1.0
+    action: str = "accept"
+    suggested_text: str | None = None
+    clarification_message: str | None = None
+    review_reason: str | None = None
+
+
 class TranscribeResponse(_StrictModel):
     transcribed_text: str
+    review: VoiceTranscriptionReview | None = None
 
 
 class TranscribeBytesRequest(_StrictModel):

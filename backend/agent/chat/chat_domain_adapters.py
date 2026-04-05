@@ -89,6 +89,38 @@ def maybe_research_tool_response_adapter(
     )
 
 
+def safe_weather_tool_response_adapter(
+    rest: str,
+    *,
+    conversation_id,
+    ToolChatResponse,
+    maybe_handle_weather_request,
+    safe_weather_tool_response_impl,
+):
+    return safe_weather_tool_response_impl(
+        rest,
+        conversation_id=conversation_id,
+        ToolChatResponse=ToolChatResponse,
+        maybe_handle_weather_request=maybe_handle_weather_request,
+    )
+
+
+def maybe_weather_tool_response_adapter(
+    text: str,
+    *,
+    conversation_id,
+    ToolChatResponse,
+    maybe_handle_weather_request,
+    maybe_weather_tool_response_impl,
+):
+    return maybe_weather_tool_response_impl(
+        text,
+        conversation_id=conversation_id,
+        ToolChatResponse=ToolChatResponse,
+        maybe_handle_weather_request=maybe_handle_weather_request,
+    )
+
+
 def execute_research_plan_adapter(
     plan,
     *,

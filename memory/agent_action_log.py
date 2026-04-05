@@ -7,6 +7,7 @@ import threading
 from typing import Any
 
 import config as cfg
+from backend.listener.live_state import notify_ui_update
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -138,6 +139,7 @@ def log_agent_action_event(
             ),
         )
         event_id = int(cur.lastrowid)
+    notify_ui_update(event_kind="agent_action", conversation_id=conversation_id)
     return get_agent_action_event(event_id)
 
 
