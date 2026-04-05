@@ -33,7 +33,6 @@ It is responsible for:
 
 Jarvin currently has four client surfaces:
 
-- legacy Gradio UI at `/ui`
 - shared React shell served from `/app/`
 - Tauri desktop app
 - Tauri Android shell
@@ -77,7 +76,7 @@ This path is separate from the phone mic flow.
 
 `backend/api/app.py`
 
-Composes the FastAPI app, mounts routers, serves the shared frontend at `/app/`, mounts temp audio assets, and still mounts the legacy Gradio surface.
+Composes the FastAPI app, mounts routers, serves the shared frontend at `/app/`, and mounts temp audio assets for uploaded audio and synthesized reply playback.
 
 ### Chat And Tool Routing
 

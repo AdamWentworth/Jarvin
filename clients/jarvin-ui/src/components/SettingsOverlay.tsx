@@ -65,6 +65,7 @@ type SettingsOverlayProps = {
   notificationsSupported: boolean;
   notificationsEnabled: boolean;
   notificationPermission: ReminderNotificationPermission;
+  notificationNeedsSystemSettings: boolean;
   notificationStatus: string;
   notificationSyncing: boolean;
   scheduledReminderCount: number;
@@ -135,6 +136,7 @@ export function SettingsOverlay({
   notificationsSupported,
   notificationsEnabled,
   notificationPermission,
+  notificationNeedsSystemSettings,
   notificationStatus,
   notificationSyncing,
   scheduledReminderCount,
@@ -162,6 +164,12 @@ export function SettingsOverlay({
     }
     if (permission === "denied") {
       return "Denied";
+    }
+    if (permission === "prompt-with-rationale") {
+      return "Needs rationale";
+    }
+    if (permission === "blocked-in-settings") {
+      return "Blocked in settings";
     }
     return "Not requested";
   }
@@ -561,7 +569,7 @@ export function SettingsOverlay({
                     onClick={onRequestNotificationsPermission}
                     disabled={!notificationsSupported}
                   >
-                    Allow notifications
+                    {notificationNeedsSystemSettings ? "Check Android settings" : "Allow notifications"}
                   </button>
                   <button
                     type="button"

@@ -13,8 +13,6 @@ Override via env vars (prefix JARVIN_, case-insensitive), e.g.:
   JARVIN_CORS_ALLOW_ORIGINS='["http://localhost:3000"]'
   JARVIN_SERVER_HOST=0.0.0.0
   JARVIN_SERVER_PORT=8000
-  JARVIN_GRADIO_AUTO_OPEN=true
-  JARVIN_GRADIO_OPEN_DELAY_SEC=1.0
 
   # persistence
   JARVIN_DATA_DIR=./data
@@ -159,14 +157,9 @@ class Settings(BaseSettings):
     # Voice shutdown
     voice_shutdown_confirm: bool = False
 
-    # ---- Server / Gradio UI ----
+    # ---- Server ----
     server_host: str = "0.0.0.0"
     server_port: int = 8000
-    gradio_use_cdn: bool = True
-    gradio_analytics_enabled: bool = False
-    gradio_mount_path: str = "/ui"
-    gradio_auto_open: bool = True
-    gradio_open_delay_sec: float = 1.0
 
     # ---- Persistent data ----
     data_dir: str = "data"

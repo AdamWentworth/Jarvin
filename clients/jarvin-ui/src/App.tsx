@@ -131,6 +131,7 @@ function App() {
     notificationsEnabled,
     notificationsSupported,
     notificationPermission,
+    notificationNeedsSystemSettings,
     notificationStatus,
     notificationSyncing,
     scheduledReminderCount,
@@ -861,6 +862,7 @@ function App() {
         notificationsSupported={notificationsSupported}
         notificationsEnabled={notificationsEnabled}
         notificationPermission={notificationPermission}
+        notificationNeedsSystemSettings={notificationNeedsSystemSettings}
         notificationStatus={notificationStatus}
         notificationSyncing={notificationSyncing}
         scheduledReminderCount={scheduledReminderCount}

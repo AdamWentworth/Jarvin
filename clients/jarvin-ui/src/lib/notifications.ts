@@ -7,7 +7,11 @@ const DELIVERED_REMINDER_NOTIFICATIONS_KEY = "jarvin.reminderNotifications.deliv
 export const REMINDER_NOTIFICATION_CHANNEL_ID = "jarvin-reminders";
 export const REMINDER_NOTIFICATION_SYNC_WINDOW_DAYS = 14;
 
-export type ReminderNotificationPermission = NotificationPermission | "unsupported";
+export type ReminderNotificationPermission =
+  | NotificationPermission
+  | "prompt-with-rationale"
+  | "blocked-in-settings"
+  | "unsupported";
 
 export type ScheduledReminderNotification = {
   id: number;

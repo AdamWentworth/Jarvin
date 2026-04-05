@@ -34,7 +34,6 @@ def _test_env_isolation():
     os.environ.setdefault("JARVIN_DB_FILENAME", "jarvin_test.sqlite3")
     os.environ.setdefault("JARVIN_DB_WAL", "false")
     os.environ.setdefault("JARVIN_LLM_AUTO_PROVISION", "false")
-    os.environ.setdefault("JARVIN_GRADIO_AUTO_OPEN", "false")
     os.environ.setdefault("JARVIN_TEMP_DIR", os.path.join(tmp_root, "temp"))
 
     # let tests run; per-test fixtures can tighten further

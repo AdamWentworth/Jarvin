@@ -16,7 +16,6 @@ Desktop and phone clients then connect to that host over local network or WireGu
 
 - local `llama.cpp` runtime with optional headless Ollama backend
 - typed chat with multi-conversation history
-- legacy Gradio UI at `/ui`
 - shared React client served at `/app/`
 - Tauri desktop app
 - Tauri Android shell
@@ -75,7 +74,6 @@ python server.py
 
 Then open one of:
 
-- `http://127.0.0.1:8000/ui`
 - `http://127.0.0.1:8000/app/`
 
 ## Clients

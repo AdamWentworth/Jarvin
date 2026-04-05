@@ -14,7 +14,7 @@ The goal is not to train a brand-new foundation model. The goal is to build a st
 
 ## What Exists Today
 
-- FastAPI host with a legacy Gradio UI at `/ui`
+- FastAPI host serving the shared `/app/` shell and APIs
 - shared React frontend served at `/app/`
 - Tauri desktop client
 - Tauri Android shell for phone testing

@@ -32,6 +32,7 @@ import {
 import type { ReminderItem } from "../lib/types";
 
 const REMINDER_SYNC_INTERVAL_MS = 1000 * 60 * 5;
+const NOTIFICATION_PERMISSION_TIMEOUT_MS = 10000;
 
 type UseReminderNotificationsArgs = {
   apiBaseUrl: string;
@@ -43,6 +44,7 @@ type UseReminderNotificationsResult = {
   notificationsSupported: boolean;
   notificationsEnabled: boolean;
   notificationPermission: ReminderNotificationPermission;
+  notificationNeedsSystemSettings: boolean;
   notificationStatus: string;
   notificationSyncing: boolean;
   scheduledReminderCount: number;
@@ -53,14 +55,59 @@ type UseReminderNotificationsResult = {
   sendTestNotification: () => Promise<void>;
 };
 
-function currentNotificationPermission(granted: boolean): ReminderNotificationPermission {
-  if (granted) {
-    return "granted";
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function windowNotificationPermission(): ReminderNotificationPermission {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "default";
   }
-  if (typeof window !== "undefined" && "Notification" in window && typeof window.Notification?.permission === "string") {
-    return window.Notification.permission;
+
+  const permission = window.Notification.permission;
+  if (permission === "granted" || permission === "denied" || permission === "default") {
+    return permission;
   }
   return "default";
+}
+
+async function getNotificationPermissionState(): Promise<ReminderNotificationPermission> {
+  const granted = (await isPermissionGranted()) as boolean | null;
+  if (granted === true) {
+    return "granted";
+  }
+  if (granted === false) {
+    return windowNotificationPermission() === "default" ? "denied" : windowNotificationPermission();
+  }
+
+  return windowNotificationPermission();
+}
+
+function permissionBlockedMessage(permission: ReminderNotificationPermission): string {
+  if (permission === "granted") {
+    return "Android notification permission is granted. If you still do not see Jarvin notifications, open the Jarvin app settings on your phone and make sure Notifications are enabled there.";
+  }
+  if (permission === "denied" || permission === "blocked-in-settings") {
+    return "Notification permission is disabled for Jarvin on this device. Open the Jarvin app settings on your phone and enable Notifications there.";
+  }
+  if (permission === "prompt-with-rationale") {
+    return "Android wants another confirmation before Jarvin can post notifications. Tap Allow notifications again and accept the system prompt on the device.";
+  }
+  return "Allow notifications on this device to receive Jarvin reminders.";
 }
 
 function dueTimeMs(reminder: ReminderItem): number {
@@ -85,6 +132,7 @@ export function useReminderNotifications({
   const [notificationPermission, setNotificationPermission] = useState<ReminderNotificationPermission>(
     notificationsSupported ? "default" : "unsupported",
   );
+  const [notificationNeedsSystemSettings, setNotificationNeedsSystemSettings] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState("");
   const [notificationSyncing, setNotificationSyncing] = useState(false);
   const [scheduledReminderCount, setScheduledReminderCount] = useState(0);
@@ -95,11 +143,12 @@ export function useReminderNotifications({
   async function refreshPermissionState(): Promise<ReminderNotificationPermission> {
     if (!notificationsSupported) {
       setNotificationPermission("unsupported");
+      setNotificationNeedsSystemSettings(false);
       return "unsupported";
     }
 
-    const granted = await isPermissionGranted();
-    const next = currentNotificationPermission(granted);
+    const next = await getNotificationPermissionState();
+    setNotificationNeedsSystemSettings(next === "denied" || next === "blocked-in-settings");
     setNotificationPermission(next);
     return next;
   }
@@ -156,7 +205,7 @@ export function useReminderNotifications({
 
       const permission = await refreshPermissionState();
       if (permission !== "granted") {
-        setNotificationStatus("Allow notifications on this device to receive Jarvin reminders.");
+        setNotificationStatus(permissionBlockedMessage(permission));
         return;
       }
 
@@ -298,7 +347,8 @@ export function useReminderNotifications({
     if (permission === "granted") {
       await syncReminderNotifications();
     } else {
-      setNotificationStatus("Reminder notifications are enabled. Allow notifications on this device to finish setup.");
+      setNotificationNeedsSystemSettings(permission === "denied" || permission === "blocked-in-settings");
+      setNotificationStatus(permissionBlockedMessage(permission));
     }
   }
 
@@ -309,12 +359,29 @@ export function useReminderNotifications({
     }
 
     try {
+      const currentPermission = await refreshPermissionState();
+      if (currentPermission === "granted") {
+        setNotificationStatus(
+          notificationsEnabled
+            ? "Notification permission is already granted. Syncing reminders..."
+            : "Notification permission is already granted on this device.",
+        );
+        if (notificationsEnabled) {
+          await syncReminderNotifications();
+        }
+        return;
+      }
+
       setNotificationStatus("Requesting notification permission...");
-      const permission = await requestPermission();
-      const nextPermission = permission === "granted" ? "granted" : permission;
+      const permission = await withTimeout(
+        requestPermission() as Promise<ReminderNotificationPermission>,
+        NOTIFICATION_PERMISSION_TIMEOUT_MS,
+        "Notification permission request did not finish. If Android did not show a prompt, open the Jarvin app settings on your phone and enable Notifications there.",
+      );
+      const nextPermission = await refreshPermissionState();
       setNotificationPermission(nextPermission);
 
-      if (permission === "granted") {
+      if (nextPermission === "granted") {
         setNotificationStatus(
           notificationsEnabled
             ? "Notification permission granted. Syncing reminders..."
@@ -324,9 +391,11 @@ export function useReminderNotifications({
           await syncReminderNotifications();
         }
       } else {
-        setNotificationStatus("Notification permission was not granted on this device.");
+        setNotificationNeedsSystemSettings(permission === "denied");
+        setNotificationStatus(permissionBlockedMessage(permission));
       }
     } catch (error) {
+      setNotificationNeedsSystemSettings(true);
       setNotificationStatus(describeError(error));
     }
   }
@@ -340,7 +409,7 @@ export function useReminderNotifications({
     try {
       const permission = await refreshPermissionState();
       if (permission !== "granted") {
-        setNotificationStatus("Allow notifications on this device before sending a test alert.");
+        setNotificationStatus(permissionBlockedMessage(permission));
         return;
       }
 
@@ -389,6 +458,7 @@ export function useReminderNotifications({
     notificationsSupported,
     notificationsEnabled,
     notificationPermission,
+    notificationNeedsSystemSettings,
     notificationStatus,
     notificationSyncing,
     scheduledReminderCount,

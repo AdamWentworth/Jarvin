@@ -129,6 +129,10 @@ def create_app() -> FastAPI:
     app.include_router(workspace_router)
     app.include_router(reminders_router)
 
+    @app.get("/", include_in_schema=False)
+    def _root_redirect():
+        return RedirectResponse(url="/app/", status_code=307)
+
     @app.get("/app", include_in_schema=False)
     def _desktop_shell_redirect():
         return RedirectResponse(url="/app/", status_code=307)

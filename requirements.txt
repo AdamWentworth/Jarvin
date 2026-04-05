@@ -15,8 +15,7 @@ pyaudio==0.2.13
 # For uploads (the /transcribe endpoint)
 python-multipart==0.0.9
 
-# For frontend
-gradio==4.44.1
+# For integrations and API clients
 requests==2.32.3
 google-api-python-client==2.179.0
 google-auth-httplib2==0.2.0

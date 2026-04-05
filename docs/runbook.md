@@ -45,7 +45,6 @@ http://0.0.0.0:8000
 
 Useful local entry points:
 
-- `http://127.0.0.1:8000/ui` for the legacy Gradio UI
 - `http://127.0.0.1:8000/app/` for the shared React shell
 
 ## Useful `.env` Settings
