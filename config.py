@@ -84,9 +84,11 @@ class Settings(BaseSettings):
     models_dir: str = "models"
     llm_backend: str = "llama_cpp"
     llm_auto_provision: bool = True
-    llm_force_logical_name: str = "phi-3-mini-4k-instruct"
+    llm_force_logical_name: str = "qwen2.5-3b-instruct"
     llm_model_preference: List[str] = Field(
         default_factory=lambda: [
+            "qwen2.5-3b-instruct",
+            "llama-3.2-3b-instruct",
             "mistral-7b-instruct",
             "phi-3-mini-4k-instruct",
             "neural-chat-7b",
@@ -122,10 +124,7 @@ class Settings(BaseSettings):
     agent_web_search_provider: str = "duckduckgo_lite"
     google_search_api_key: str = ""
     google_search_engine_id: str = ""
-    google_calendar_credentials_file: str = "secrets/google-calendar-client.json"
-    google_calendar_token_file: str = "data/google-calendar-token.json"
-    google_calendar_id: str = "primary"
-    google_calendar_max_events: int = 10
+    calendar_max_events: int = 10
     weather_temperature_unit: str = "fahrenheit"
     weather_wind_speed_unit: str = "mph"
     default_weather_location: str = ""

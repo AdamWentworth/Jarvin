@@ -57,6 +57,7 @@ class CalendarEventSummary:
     starts_at: str
     title: str
     location: str
+    item_kind: str = "event"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class CalendarAgendaResult:
     calendar_id: str
     window_days: int
     events: list[CalendarEventSummary]
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class CalendarEventMatch:
     ends_at: str
     location: str
     description: str = ""
+    calendar_id: str = "local"
 
 
 @dataclass(frozen=True)

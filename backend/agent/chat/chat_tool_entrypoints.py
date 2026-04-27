@@ -86,8 +86,10 @@ def maybe_handle_natural_language_tool_request_impl(
     agent_access_mode,
     ToolChatResponse,
     calendar_auth_re,
-    begin_google_calendar_auth,
+    begin_calendar_setup,
     maybe_active_follow_up_response,
+    maybe_organizer_tool_response,
+    maybe_compound_tool_response,
     maybe_weather_tool_response,
     maybe_handle_brief_request,
     maybe_handle_reminder_request,
@@ -135,8 +137,8 @@ def maybe_handle_natural_language_tool_request_impl(
 
     if calendar_auth_re.search(message):
         return safe_tool_call(
-            lambda: begin_google_calendar_auth(),
-            "I couldn't start Google Calendar authorization.",
+            lambda: begin_calendar_setup(),
+            "I couldn't open the local calendar setup message.",
             active_domain="calendar",
         )
 
@@ -148,6 +150,24 @@ def maybe_handle_natural_language_tool_request_impl(
     )
     if active_follow_up is not None:
         return active_follow_up
+
+    organizer_reply = maybe_organizer_tool_response(
+        message,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+        agent_access_mode=agent_access_mode,
+    )
+    if organizer_reply is not None:
+        return organizer_reply
+
+    compound_reply = maybe_compound_tool_response(
+        message,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+        agent_access_mode=agent_access_mode,
+    )
+    if compound_reply is not None:
+        return compound_reply
 
     weather_reply = maybe_weather_tool_response(message, conversation_id=conversation_id)
     if weather_reply is not None:
@@ -194,7 +214,11 @@ def maybe_handle_natural_language_tool_request_impl(
 
     calendar_create = extract_calendar_create_text(message)
     if calendar_create:
-        return safe_tool_call(lambda: calendar_create_reply(calendar_create), "I couldn't create that calendar event.", active_domain="calendar")
+        return safe_tool_call(
+            lambda: calendar_create_reply(calendar_create, conversation_id=conversation_id),
+            "I couldn't create that calendar event.",
+            active_domain="calendar",
+        )
 
     rename_match = calendar_rename_re.search(message) or calendar_title_re.search(message)
     if rename_match:

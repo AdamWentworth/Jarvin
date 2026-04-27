@@ -30,6 +30,52 @@ _SHORT_SAFE_PATTERNS = (
     re.compile(r"^(at\s+)?\d{1,2}(:\d{2})?\s*(am|pm)?$", re.IGNORECASE),
     re.compile(r"^(in|after|before)\s+.+$", re.IGNORECASE),
 )
+_COHERENT_REQUEST_PATTERNS = (
+    re.compile(
+        r"^(hey\s+jarv(?:in|an|is)[,:\s-]*)?"
+        r"(what(?:'s|\s+is)?|whats|how(?:'s|\s+is)?|can you|could you|would you|please|show|tell|give|put|add|"
+        r"make|set|schedule|move|rename|delete|remove|keep|list|output|read|open|look|find|research|remind|"
+        r"create|update|change|turn|play|connect|run|start|stop|pause|resume|weather|forecast|calendar|"
+        r"reminder|reminders|brief|search)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^(i\s+(?:was|am|meant|want|need|would|think|thought)\b.+)$", re.IGNORECASE),
+)
+_COMMON_SPEECH_WORDS = {
+    "a",
+    "about",
+    "all",
+    "an",
+    "and",
+    "anything",
+    "around",
+    "at",
+    "calendar",
+    "for",
+    "from",
+    "go",
+    "going",
+    "i",
+    "in",
+    "is",
+    "it",
+    "me",
+    "my",
+    "of",
+    "on",
+    "or",
+    "other",
+    "please",
+    "reminders",
+    "that",
+    "the",
+    "them",
+    "to",
+    "tomorrow",
+    "today",
+    "what",
+    "with",
+}
 
 
 @dataclass(frozen=True)
@@ -68,10 +114,10 @@ def review_remote_transcription(text: str) -> VoiceTranscriptionReviewResult:
         return heuristic_review
 
     cfg_obj = build_jarvin_config(
-        mode="agent_strong",
+        mode="voice_fast",
         system_instructions=_review_system_prompt(),
         temperature=0.1,
-        max_tokens=220,
+        max_tokens=160,
     )
     prompt = f"User speech transcript:\n{cleaned}"
 
@@ -163,6 +209,23 @@ def _heuristic_review(text: str) -> VoiceTranscriptionReviewResult | None:
             suggested_text=text,
             clarification_message=f'I heard "{text}". Does that look right before I act on it?',
             review_reason="Single-word transcript could be a valid follow-up, but it is easy for ASR to mangle.",
+        )
+    if _looks_like_coherent_request(text):
+        return VoiceTranscriptionReviewResult(
+            confidence_level="high",
+            confidence_score=0.88,
+            action="accept",
+            clarification_message=None,
+            review_reason="Transcript looks like a coherent spoken request or follow-up, so Jarvin can act on it directly.",
+        )
+    if _looks_like_ambiguous_short_phrase(text):
+        return VoiceTranscriptionReviewResult(
+            confidence_level="medium",
+            confidence_score=0.52,
+            action="confirm",
+            suggested_text=text,
+            clarification_message=f'I heard "{text}". Does that look right before I act on it?',
+            review_reason="Short phrase could easily be a misheard name or place, so Jarvin should confirm it before acting.",
         )
     return None
 
@@ -256,6 +319,43 @@ def _normalize_for_equivalence(text: str) -> str:
     normalized = re.sub(r"[^\w\s]", "", normalized)
     normalized = " ".join(normalized.split())
     return normalized
+
+
+def _looks_like_coherent_request(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    if not lowered:
+        return False
+    if len(lowered.split()) < 3:
+        return False
+    if not re.fullmatch(r"[\w\s'\",.!?:;/@&()\-]+", text):
+        return False
+    for pattern in _COHERENT_REQUEST_PATTERNS:
+        if pattern.match(lowered):
+            return True
+
+    word_tokens = re.findall(r"[a-z]+(?:'[a-z]+)?|\d{1,2}(?::\d{2})?(?:am|pm)?", lowered)
+    alpha_tokens = [token for token in word_tokens if re.search(r"[a-z]", token)]
+    if len(alpha_tokens) < 3:
+        return False
+
+    common_hits = sum(1 for token in alpha_tokens if token in _COMMON_SPEECH_WORDS)
+    if len(word_tokens) >= 6 and common_hits >= 2:
+        return True
+    if len(word_tokens) >= 4 and common_hits >= 3:
+        return True
+    return False
+
+
+def _looks_like_ambiguous_short_phrase(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    if not lowered or _looks_like_coherent_request(text):
+        return False
+    word_tokens = re.findall(r"[a-z]+(?:'[a-z]+)?|\d{1,2}(?::\d{2})?(?:am|pm)?", lowered)
+    if not 3 <= len(word_tokens) <= 5:
+        return False
+    if sum(1 for token in word_tokens if token in _COMMON_SPEECH_WORDS) >= 2:
+        return False
+    return True
 
 
 def _looks_meta_suggestion(text: str) -> bool:

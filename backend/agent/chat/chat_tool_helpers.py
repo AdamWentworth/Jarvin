@@ -5,16 +5,18 @@ from datetime import datetime
 
 import config as cfg
 import backend.agent.host_tool_runtime as host_tool_runtime
+from backend.agent.calendar.calendar_integration_service import CalendarCreateNeedsMoreDetail
+from backend.agent.calendar.calendar_request_nlu import normalize_calendar_create_text
+from backend.agent.calendar.calendar_request_tools import clear_pending_calendar_create, remember_pending_calendar_create
 from backend.agent.chat.chat_intent_patterns import CALENDAR_MOVE_RE
 from backend.agent.integration_facade import (
+    begin_calendar_setup,
     create_calendar_event_from_text,
     delete_calendar_event,
     find_calendar_events,
     get_calendar_agenda,
     get_calendar_event_details,
     get_weather,
-    google_calendar_credentials_configured,
-    google_calendar_token_available,
     google_search_is_configured,
     prepare_reschedule_times,
     reschedule_calendar_event,
@@ -28,15 +30,13 @@ from backend.ai_engine import build_jarvin_config, generate_reply
 def calendar_command_reply(rest: str, *, conversation_id: int | None) -> str:
     lower = rest.lower()
     if lower == "auth":
-        from backend.agent.integration_facade import begin_google_calendar_auth
-
-        return begin_google_calendar_auth()
+        return begin_calendar_setup()
     if lower.startswith("details ") or lower.startswith("show "):
         query = rest.split(" ", 1)[1].strip()
         return calendar_details_reply(query)
     if lower.startswith("add ") or lower.startswith("create "):
         details = rest.split(" ", 1)[1].strip()
-        return calendar_create_reply(details)
+        return calendar_create_reply(details, conversation_id=conversation_id)
     if lower.startswith("rename ") or lower.startswith("retitle "):
         _, _, payload = rest.partition(" ")
         query, new_title = partition_calendar_payload(payload, "Use `/tool calendar rename <event name> | <new title>`.")
@@ -78,8 +78,19 @@ def calendar_command_reply(rest: str, *, conversation_id: int | None) -> str:
     return calendar_lookup_reply(rest)
 
 
-def calendar_create_reply(details: str) -> str:
-    created = create_calendar_event_from_text(details)
+def calendar_create_reply(details: str, *, conversation_id: int | None = None) -> str:
+    try:
+        created = create_calendar_event_from_text(details)
+    except CalendarCreateNeedsMoreDetail as exc:
+        remember_pending_calendar_create(
+            conversation_id,
+            title=exc.title,
+            date_hint=exc.date_hint,
+            time_hint=exc.time_hint,
+        )
+        return str(exc)
+
+    clear_pending_calendar_create(conversation_id)
     location = f" at {created.location}" if created.location else ""
     return f"Created `{created.title}` on your calendar for `{created.starts_at}`{location}."
 
@@ -87,7 +98,7 @@ def calendar_create_reply(details: str) -> str:
 def calendar_details_reply(query: str) -> str:
     matches = find_calendar_events(query)
     match = pick_single_calendar_match(matches, query)
-    details = get_calendar_event_details(match.event_id)
+    details = get_calendar_event_details(match.event_id, calendar_id=match.calendar_id)
     notes = details.description.strip() or "(none)"
     location = details.location.strip() or "(none)"
     return (
@@ -109,6 +120,7 @@ def calendar_delete_request_reply(query: str, *, conversation_id: int | None) ->
             event_id=match.event_id,
             title=match.title,
             starts_at=display_event_time(match),
+            calendar_id=match.calendar_id,
         ),
     )
     return (
@@ -129,6 +141,7 @@ def calendar_move_request_reply(query: str, when_text: str, *, conversation_id: 
             event_id=match.event_id,
             title=match.title,
             starts_at=display_event_time(match),
+            calendar_id=match.calendar_id,
             new_start_iso=new_start_iso,
             new_end_iso=new_end_iso,
         ),
@@ -156,6 +169,7 @@ def calendar_update_request_reply(
             event_id=match.event_id,
             title=match.title,
             starts_at=display_event_time(match),
+            calendar_id=match.calendar_id,
             new_title=title,
             new_location=location,
             new_description=description,
@@ -169,29 +183,18 @@ def calendar_update_request_reply(
 
 
 def calendar_lookup_reply(raw: str, *, window_days_override: int | None = None) -> str:
-    if not google_calendar_credentials_configured():
-        creds_path = cfg.settings.google_calendar_credentials_file
-        return (
-            "I can't access your Google Calendar yet because this host does not have Google OAuth credentials configured. "
-            f"Put your desktop OAuth client JSON at `{creds_path}`, then ask me to connect your calendar."
-        )
-
-    if not google_calendar_token_available():
-        return (
-            "I can access your Google Calendar once you authorize it on this host. "
-            "Ask me to connect or authorize your Google Calendar and I will start the OAuth flow."
-        )
-
     inferred_window_days = infer_calendar_window_days(raw)
     window_days = int(window_days_override if window_days_override is not None else (inferred_window_days or 7))
     agenda = get_calendar_agenda(window_days=window_days)
     if not agenda.events:
-        return f"No events were found in `{agenda.calendar_id}` for the next {agenda.window_days} day(s)."
+        warning = "\n" + "\n".join(f"- {item}" for item in agenda.warnings) if agenda.warnings else ""
+        return f"No events were found in `{agenda.calendar_id}` for the next {agenda.window_days} day(s).{warning}"
     lines = [
-        f"- `{event.starts_at}` {event.title}" + (f" at {event.location}" if event.location else "")
+        f"- `{event.starts_at}` {_calendar_item_label(event)}" + (f" at {event.location}" if event.location else "")
         for event in agenda.events
     ]
-    return f"Upcoming events from `{agenda.calendar_id}` for the next {agenda.window_days} day(s):\n" + "\n".join(lines)
+    warnings = ("\nWarnings:\n" + "\n".join(f"- {item}" for item in agenda.warnings)) if agenda.warnings else ""
+    return f"Upcoming events from `{agenda.calendar_id}` for the next {agenda.window_days} day(s):\n" + "\n".join(lines) + warnings
 
 
 def list_reply(path: str) -> str:
@@ -337,6 +340,11 @@ def weather_reply(location: str) -> str:
     )
 
 
+def _calendar_item_label(event) -> str:
+    prefix = "Task: " if getattr(event, "item_kind", "event") == "task" else ""
+    return f"{prefix}{event.title}"
+
+
 def pick_single_calendar_match(matches: list, query: str):
     if not matches:
         raise ValueError(f"I couldn't find a calendar event matching '{query}'.")
@@ -449,22 +457,43 @@ def partition_calendar_payload(payload: str, usage: str) -> tuple[str, str]:
 
 def extract_calendar_create_text(message: str) -> str | None:
     lower = message.lower()
-    if "calendar" not in lower:
+    if "calendar" not in lower and not any(lower.startswith(prefix) for prefix in ("add ", "create ", "schedule ", "put ", "please add ", "please create ", "please schedule ", "please put ")):
         return None
-    if not any(
-        lower.startswith(prefix)
-        for prefix in ("add ", "create ", "schedule ", "put ", "please add ", "please create ", "please schedule ", "please put ")
-    ):
-        return None
-
-    candidate = re.sub(r"^(?:please\s+)?(?:add|create|schedule|put)\s+", "", message, flags=re.IGNORECASE)
-    candidate = re.sub(r"\s+(?:to|on|in)\s+(?:my\s+)?calendar\b", "", candidate, flags=re.IGNORECASE).strip()
-    cleaned = clean_query(candidate)
-    return cleaned or None
+    return normalize_calendar_create_text(message)
 
 
 def normalize_confirmation_text(text: str) -> str:
-    return str(text or "").strip().lower().rstrip(".!")
+    normalized = str(text or "").strip().lower().rstrip(".!")
+    if not normalized:
+        return normalized
+    affirmative_prefixes = (
+        "yes",
+        "yeah",
+        "yep",
+        "sure",
+        "okay",
+        "ok",
+        "confirm",
+        "go ahead",
+        "do it",
+        "please do",
+    )
+    negative_prefixes = (
+        "no",
+        "nope",
+        "deny",
+        "cancel",
+        "stop",
+        "never mind",
+        "nevermind",
+    )
+    for prefix in affirmative_prefixes:
+        if normalized == prefix or normalized.startswith(prefix + " ") or normalized.startswith(prefix + ","):
+            return prefix
+    for prefix in negative_prefixes:
+        if normalized == prefix or normalized.startswith(prefix + " ") or normalized.startswith(prefix + ","):
+            return prefix
+    return normalized
 
 
 def clean_query(value: str) -> str:

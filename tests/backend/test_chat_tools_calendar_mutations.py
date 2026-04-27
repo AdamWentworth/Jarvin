@@ -2,8 +2,18 @@
 
 import backend.agent.chat.chat_tool_helpers as chat_tool_helpers
 import backend.agent.chat.assistant_chat_tools as chat_tools
+import config as cfg
+import memory.calendar_events as calendar_events
+from backend.agent.calendar.calendar_request_tools import _reset_calendar_context_for_tests
 from backend.agent.integration_facade import CalendarEventDetails, CalendarEventMatch, CalendarEventSummary
 from backend.agent.calendar_pending_actions import clear_pending_calendar_action
+
+
+def _use_temp_db(tmp_path) -> None:
+    cfg.settings.data_dir = str(tmp_path)
+    cfg.settings.db_filename = "calendar-chat-test.sqlite3"
+    calendar_events._reset_for_tests()
+    _reset_calendar_context_for_tests()
 
 
 def test_natural_language_calendar_delete_requires_confirmation(monkeypatch):
@@ -27,7 +37,7 @@ def test_natural_language_calendar_delete_requires_confirmation(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
         "delete_calendar_event",
-        lambda event_id: CalendarEventSummary(
+        lambda event_id, calendar_id=None: CalendarEventSummary(
             starts_at="2026-04-05 02:00 PM",
             title="Dentist appointment",
             location="Dental office",
@@ -74,9 +84,9 @@ def test_natural_language_calendar_rename_requires_confirmation(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
         "update_calendar_event_fields",
-        lambda event_id, title=None, location=None, description=None: CalendarEventDetails(
+        lambda event_id, calendar_id=None, title=None, location=None, description=None: CalendarEventDetails(
             event_id=event_id,
-            calendar_id="primary",
+            calendar_id=calendar_id or "primary",
             starts_at="2026-04-05 12:00 PM",
             ends_at="2026-04-05 01:00 PM",
             title=title or "Lunch with Sam",
@@ -126,9 +136,9 @@ def test_natural_language_calendar_location_update_requires_confirmation(monkeyp
     monkeypatch.setattr(
         chat_tools,
         "update_calendar_event_fields",
-        lambda event_id, title=None, location=None, description=None: CalendarEventDetails(
+        lambda event_id, calendar_id=None, title=None, location=None, description=None: CalendarEventDetails(
             event_id=event_id,
-            calendar_id="primary",
+            calendar_id=calendar_id or "primary",
             starts_at="2026-04-07 01:00 PM",
             ends_at="2026-04-07 02:00 PM",
             title="Project sync",
@@ -177,9 +187,9 @@ def test_natural_language_calendar_notes_update_requires_confirmation(monkeypatc
     monkeypatch.setattr(
         chat_tools,
         "update_calendar_event_fields",
-        lambda event_id, title=None, location=None, description=None: CalendarEventDetails(
+        lambda event_id, calendar_id=None, title=None, location=None, description=None: CalendarEventDetails(
             event_id=event_id,
-            calendar_id="primary",
+            calendar_id=calendar_id or "primary",
             starts_at="2026-04-09 09:00 AM",
             ends_at="2026-04-09 10:00 AM",
             title="Doctor visit",
@@ -270,7 +280,7 @@ def test_natural_language_calendar_reschedule_requires_confirmation(monkeypatch)
     monkeypatch.setattr(
         chat_tools,
         "reschedule_calendar_event",
-        lambda event_id, new_start_iso, new_end_iso: CalendarEventSummary(
+        lambda event_id, calendar_id=None, new_start_iso=None, new_end_iso=None: CalendarEventSummary(
             starts_at="2026-04-08 03:30 PM",
             title="Project sync",
             location="Conference room",
@@ -363,4 +373,34 @@ def test_contextual_calendar_location_follow_up_is_handled(monkeypatch):
         assert "location -> `Zoom`" in response.reply
     finally:
         clear_pending_calendar_action(conversation_id)
+
+
+def test_calendar_create_missing_time_prompts_then_follow_up_completes_event(tmp_path):
+    conversation_id = 30
+    _use_temp_db(tmp_path)
+
+    try:
+        first = chat_tools.maybe_handle_assistant_tool_request(
+            "Hey Jarvan, can you please make me an appointment for going to Costco tomorrow?",
+            conversation_id=conversation_id,
+        )
+        second = chat_tools.maybe_handle_assistant_tool_request(
+            "I was thinking of going to Costco around 12 noon.",
+            conversation_id=conversation_id,
+        )
+        matches = chat_tool_helpers.find_calendar_events("Costco", window_days=7)
+
+        assert first.handled is True
+        assert "What time should I use?" in first.reply
+        assert "`tomorrow`" in first.reply
+
+        assert second.handled is True
+        assert "Created `going to Costco`" in second.reply
+        assert "12:00 PM" in second.reply
+
+        assert matches
+        assert matches[0].title == "going to Costco"
+    finally:
+        calendar_events._reset_for_tests()
+        _reset_calendar_context_for_tests()
 

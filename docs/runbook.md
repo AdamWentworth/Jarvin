@@ -57,11 +57,10 @@ JARVIN_AGENT_WEB_SEARCH_PROVIDER=duckduckgo_lite
 JARVIN_DEFAULT_WEATHER_LOCATION=Seattle
 ```
 
-Useful integration paths:
+Useful local calendar tuning:
 
 ```dotenv
-JARVIN_GOOGLE_CALENDAR_CREDENTIALS_FILE=secrets/google-calendar-client.json
-JARVIN_GOOGLE_CALENDAR_TOKEN_FILE=data/google-calendar-token.json
+JARVIN_CALENDAR_MAX_EVENTS=10
 ```
 
 ## Run The Desktop Shell
@@ -189,37 +188,17 @@ Expected result:
 - `provider=duckduckgo_lite`
 - non-zero `results`
 
-## Google Calendar Setup
+## Built-In Calendar
 
-1. Create a Google OAuth desktop client in Google Cloud.
-2. Save the JSON file as:
+Jarvin now keeps its calendar locally in SQLite.
 
-```text
-secrets/google-calendar-client.json
-```
+- database: `data/jarvin.sqlite3`
+- table: `calendar_events`
+- setup: none
 
-3. Start Jarvin:
+You do not need a Google project, OAuth client, or saved browser token anymore.
 
-```powershell
-python server.py
-```
-
-4. In chat, say one of:
-
-```text
-connect my Google Calendar
-authorize my Google Calendar
-```
-
-5. Complete the browser OAuth flow on the host machine.
-
-The saved token lands at:
-
-```text
-data/google-calendar-token.json
-```
-
-Validate calendar setup:
+Validate the local calendar:
 
 ```powershell
 .\.venv\Scripts\python scripts\validate_integrations.py --calendar-only
@@ -259,6 +238,23 @@ Pull up backend/api/app.py lines 10 to 30.
 Research llama.cpp windows cuda docs for me.
 What else did you find?
 ```
+
+Host tasks and approvals:
+
+```text
+Could you inspect the repo for how live updates are wired and summarize the files involved?
+Run git status.
+Write a short note in notes/manual-test.txt saying manual test started.
+```
+
+Voice review:
+
+```text
+What's the weather in Burnaby by Metro Hound?
+Remind me tomorrow at 10am to hug a nest.
+```
+
+Those intentionally awkward voice-style prompts should trigger confirmation or repeat behavior instead of being acted on blindly.
 
 ## Useful Test Commands
 
@@ -301,14 +297,21 @@ Check:
 - that the phone can reach `http://<host-ip>:8000/healthz`
 - that the app build is current if client-side voice code changed
 
-### Calendar Exists But Is Not Authorized
+### Calendar Looks Empty
 
 The validator will show:
 
-- credentials present
-- token missing
+- `events_total=0`
+- `events_today=0`
+- `events_next_7_days=0`
 
-In that case, re-run the auth flow from chat.
+In that case, Jarvin's local calendar database is healthy but empty. Add an event in chat, then rerun:
+
+```powershell
+.\.venv\Scripts\python scripts\validate_integrations.py --calendar-only
+```
+
+If you want to inspect the raw storage directly, open `data/jarvin.sqlite3` and inspect the `calendar_events` table.
 
 ### Search Provider Confusion
 

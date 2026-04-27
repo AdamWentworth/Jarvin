@@ -51,7 +51,10 @@ def _launch_repo_venv_if_needed(
     child_env["JARVIN_ALREADY_REEXECED"] = "1"
 
     child_argv = list(argv or sys.argv)
-    return int(cmd_runner([str(target), *child_argv], env=child_env))
+    try:
+        return int(cmd_runner([str(target), *child_argv], env=child_env))
+    except KeyboardInterrupt:
+        return 0
 
 
 _reexec_code = _launch_repo_venv_if_needed()

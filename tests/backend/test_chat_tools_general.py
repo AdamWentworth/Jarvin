@@ -40,15 +40,13 @@ def test_natural_language_weather_request_is_handled(monkeypatch):
     assert response.tool_payload["icon_name"] == "sun"
 
 
-def test_natural_language_calendar_request_reports_missing_setup(monkeypatch):
-    monkeypatch.setattr(chat_tool_helpers, "google_calendar_credentials_configured", lambda: False, raising=True)
-
-    response = chat_tools.maybe_handle_assistant_tool_request("What's on my calendar tomorrow?")
+def test_natural_language_calendar_setup_phrase_reports_local_calendar_ready():
+    response = chat_tools.maybe_handle_assistant_tool_request("connect my calendar")
     assert response.handled is True
-    assert "OAuth credentials" in response.reply
+    assert "built-in calendar is ready" in response.reply
 
 
-def test_natural_language_google_calendar_lookup_uses_calendar_not_search(monkeypatch):
+def test_natural_language_google_calendar_phrase_uses_calendar_not_search(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
         "maybe_plan_calendar_request",
@@ -59,8 +57,6 @@ def test_natural_language_google_calendar_lookup_uses_calendar_not_search(monkey
         ),
         raising=True,
     )
-    monkeypatch.setattr(chat_tool_helpers, "google_calendar_credentials_configured", lambda: True, raising=True)
-    monkeypatch.setattr(chat_tool_helpers, "google_calendar_token_available", lambda: True, raising=True)
     monkeypatch.setattr(
         chat_tool_helpers,
         "get_calendar_agenda",
@@ -103,8 +99,6 @@ def test_natural_language_calendar_follow_up_week_lookup_is_handled(monkeypatch)
         ),
         raising=True,
     )
-    monkeypatch.setattr(chat_tool_helpers, "google_calendar_credentials_configured", lambda: True, raising=True)
-    monkeypatch.setattr(chat_tool_helpers, "google_calendar_token_available", lambda: True, raising=True)
     monkeypatch.setattr(
         chat_tool_helpers,
         "get_calendar_agenda",
@@ -467,9 +461,9 @@ def test_natural_language_calendar_details_are_returned(monkeypatch):
     monkeypatch.setattr(
         chat_tool_helpers,
         "get_calendar_event_details",
-        lambda event_id: CalendarEventDetails(
+        lambda event_id, calendar_id=None: CalendarEventDetails(
             event_id=event_id,
-            calendar_id="primary",
+            calendar_id=calendar_id or "primary",
             starts_at="2026-04-05 12:00 PM",
             ends_at="2026-04-05 01:00 PM",
             title="Lunch with Sam",

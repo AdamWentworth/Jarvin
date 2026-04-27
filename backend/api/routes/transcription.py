@@ -5,6 +5,7 @@ import binascii
 import logging
 import mimetypes
 import os
+import time
 import uuid
 from pathlib import Path
 
@@ -85,11 +86,27 @@ def _transcribe_bytes(filename: str | None, content_type: str | None, data: byte
             pass
 
 
+def _review_uploaded_transcription(text: str):
+    preview = text[:120].replace("\n", " ")
+    started_at = time.perf_counter()
+    log.info("Reviewing uploaded audio transcription for confidence: %s", preview)
+    review = review_remote_transcription(text)
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    log.info(
+        "Uploaded audio review complete. Action=%s confidence=%s score=%.2f elapsed_ms=%d",
+        review.action,
+        review.confidence_level,
+        review.confidence_score,
+        elapsed_ms,
+    )
+    return review
+
+
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe_endpoint(audio_file: UploadFile = File(...)) -> TranscribeResponse:
     data = await audio_file.read()
     text = _transcribe_bytes(audio_file.filename, audio_file.content_type, data)
-    review = review_remote_transcription(text)
+    review = _review_uploaded_transcription(text)
     return TranscribeResponse(transcribed_text=text, review=review.to_payload())
 
 
@@ -101,5 +118,5 @@ async def transcribe_bytes_endpoint(payload: TranscribeBytesRequest) -> Transcri
         raise HTTPException(status_code=400, detail="invalid base64 audio payload") from exc
 
     text = _transcribe_bytes(payload.filename, payload.content_type, data)
-    review = review_remote_transcription(text)
+    review = _review_uploaded_transcription(text)
     return TranscribeResponse(transcribed_text=text, review=review.to_payload())

@@ -151,3 +151,23 @@ def test_pronoun_move_uses_recent_reminder_context(tmp_path):
         reminders._reset_for_tests()
         reminder_planner.clear_reminder_context(44)
 
+
+def test_recent_list_bulk_delete_removes_both_reminders(tmp_path):
+    conversation_id = 55
+    _use_temp_db(tmp_path)
+    try:
+        reminders.create_reminder("Hug a nest", due_at=datetime.now().astimezone() + timedelta(hours=1))
+        reminders.create_reminder("Waken-ez", due_at=datetime.now().astimezone() + timedelta(hours=2))
+
+        listed = maybe_handle_reminder_request("show me my reminders", conversation_id=conversation_id)
+        deleted = maybe_handle_reminder_request("Remove the two reminders", conversation_id=conversation_id)
+        items = reminders.list_reminders()
+
+        assert listed is not None
+        assert "Pending reminders for upcoming" in listed
+        assert deleted == "Deleted 2 reminders: `Hug a nest`, `Waken-ez`."
+        assert items == []
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(conversation_id)
+

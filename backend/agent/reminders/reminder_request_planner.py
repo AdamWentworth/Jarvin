@@ -74,6 +74,7 @@ class ReminderPlan:
 class ReminderConversationContext:
     last_action: str = "unknown"
     last_title: str | None = None
+    last_listed_ids: tuple[int, ...] = ()
     awaiting_time_title: str | None = None
     awaiting_time_recurrence: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -118,12 +119,14 @@ def remember_reminder_context(
     *,
     action: str,
     last_title: str | None = None,
+    last_listed_ids: tuple[int, ...] | list[int] | None = None,
     awaiting_time_title: str | None = None,
     awaiting_time_recurrence: str | None = None,
 ) -> None:
     _reminder_context[_context_key(conversation_id)] = ReminderConversationContext(
         last_action=action or "unknown",
         last_title=last_title,
+        last_listed_ids=tuple(int(item) for item in (last_listed_ids or ())),
         awaiting_time_title=awaiting_time_title,
         awaiting_time_recurrence=awaiting_time_recurrence,
     )

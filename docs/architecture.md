@@ -31,7 +31,7 @@ It is responsible for:
 
 ### Clients
 
-Jarvin currently has four client surfaces:
+Jarvin currently has three client surfaces:
 
 - shared React shell served from `/app/`
 - Tauri desktop app
@@ -54,9 +54,11 @@ The desktop and mobile clients reuse the same React frontend and talk to the Pyt
 1. A phone client records local microphone audio
 2. The client uploads audio to the host transcription path
 3. Whisper transcribes on the host
-4. The transcribed text is sent through normal chat handling
-5. Jarvin optionally synthesizes reply audio on the host
-6. The client plays that reply through the phone speakers
+4. Jarvin reviews the transcript confidence before acting on it
+5. If the transcript looks shaky, the client shows a confirm/retry card
+6. If accepted, the text is sent through normal chat handling
+7. Jarvin optionally synthesizes reply audio on the host
+8. The client plays that reply through the phone speakers
 
 ### Host Listener
 
@@ -65,8 +67,10 @@ Jarvin still supports the host-side always-on listener path:
 1. microphone capture
 2. VAD / utterance detection
 3. Whisper transcription
-4. local LLM reply
-5. optional host-side playback
+4. transcript confidence review
+5. local clarification prompt when the transcript looks suspicious
+6. local LLM reply
+7. optional host-side playback
 
 This path is separate from the phone mic flow.
 
@@ -81,7 +85,7 @@ Composes the FastAPI app, mounts routers, serves the shared frontend at `/app/`,
 ### Chat And Tool Routing
 
 `backend/api/routes/chat.py`
-`backend/agent/chat_tools.py`
+`backend/agent/chat/assistant_chat_tools.py`
 
 This layer does the assistant orchestration.
 
@@ -89,7 +93,8 @@ It currently handles:
 
 - explicit `/tool ...` commands
 - natural-language planner routing
-- pending confirmations for risky calendar changes
+- pending confirmations and approvals for risky host actions
+- task-scoped host plans with task cards and progress updates
 - fallback to normal LLM chat when no tool path applies
 
 ### Planner Layer
@@ -98,24 +103,25 @@ Jarvin now uses domain-specific planners instead of relying only on brittle rege
 
 Current planners:
 
-- `backend/agent/weather_tools.py`
-- `backend/agent/calendar_tools.py`
-- `backend/agent/reminder_planner.py`
-- `backend/agent/workspace_tools.py`
-- `backend/agent/research_tools.py`
-- `backend/agent/brief_planner.py`
+- `backend/agent/weather/weather_request_tools.py`
+- `backend/agent/calendar/calendar_request_tools.py`
+- `backend/agent/reminders/reminder_request_planner.py`
+- `backend/agent/workspace/workspace_request_tools.py`
+- `backend/agent/research/research_request_tools.py`
+- `backend/agent/briefing/brief_request_planner.py`
 
 The shared follow-up layer:
 
-- `backend/agent/followup_context.py`
-- `backend/agent/followup_router.py`
+- `backend/agent/chat/chat_followup_context.py`
+- `backend/agent/chat/chat_followup_router.py`
 
 keeps short-lived active-domain context so ambiguous follow-ups like `how about tomorrow?` or `show me more` stay attached to the right tool domain.
 
 ### Tool Execution
 
-`backend/agent/tools.py`
-`backend/agent/external_tools.py`
+`backend/agent/host_tool_runtime.py`
+`backend/agent/integration_facade.py`
+`backend/agent/tasks`
 
 These modules provide deterministic host-side actions such as:
 
@@ -125,17 +131,26 @@ These modules provide deterministic host-side actions such as:
 - allowlisted commands
 - weather lookup
 - web research
-- Google Calendar operations
+- built-in calendar operations
+
+### Realtime Updates
+
+`backend/api/routes/live.py`
+`backend/listener/live_state.py`
+
+The client uses server-sent events from `/live/stream` as the primary realtime path for listener state, task progress, conversation updates, and action-log changes. Normal chat sends, approvals, uploads, and integration calls remain REST endpoints.
 
 ### ASR, LLM, And TTS
 
 - `backend/asr/whisper.py`
+- `backend/agent/voice/voice_transcription_review.py`
+- `backend/agent/voice/voice_listener_clarification_state.py`
 - `backend/llm/runtime_llama_cpp.py`
 - `backend/llm/runtime_router.py`
 - `backend/llm/runtime_ollama.py`
 - `backend/tts/engine.py`
 
-Jarvin prefers local inference and offline voice where possible. Optional external services exist only for integrations like web search or Google Calendar.
+Jarvin prefers local inference and offline voice where possible. Optional external services exist only for integrations like web search.
 
 ### Persistence
 
@@ -146,6 +161,10 @@ Conversation and profile state:
 Reminder and routine state:
 
 - `memory/reminders.py`
+
+Calendar state:
+
+- `memory/calendar_events.py`
 
 The default database location is:
 
@@ -175,6 +194,9 @@ Jarvin currently has meaningful support for:
 - morning / daily briefs
 - workspace and repo operations
 - web research
+- host task planning and approval cards
+- voice transcript confidence checks before action
+- mobile reminder notifications
 
 ### Response Enrichment
 
@@ -202,7 +224,10 @@ Jarvin can search, fetch top pages, and summarize what it found.
 
 ### Calendar
 
-- Google Calendar via OAuth desktop credentials and a saved token on the host
+- built into Jarvin as local SQLite state in the `calendar_events` table
+- no external account, OAuth flow, or cloud sync is required
+- supports agenda lookup, event CRUD, and simple recurring events
+- morning briefs read from the same local calendar store as normal chat/calendar operations
 
 ## Important Invariants
 
@@ -218,9 +243,12 @@ Jarvin can search, fetch top pages, and summarize what it found.
 - `config.py`: settings, env loading, `.env` support
 - `backend/api/app.py`: FastAPI composition and frontend serving
 - `backend/api/routes/chat.py`: chat + tool response path
-- `backend/agent/chat_tools.py`: central assistant router
-- `backend/agent/external_tools.py`: external integrations and helper tools
-- `backend/agent/tools.py`: workspace-safe host tools
+- `backend/agent/chat/assistant_chat_tools.py`: central assistant router
+- `backend/agent/host_tool_runtime.py`: workspace-safe host tools
+- `backend/agent/integration_facade.py`: external integrations facade
+- `backend/agent/tasks`: task-scoped host planning and execution
+- `backend/agent/voice`: voice transcript review and listener clarification
 - `memory/conversation.py`: conversations and profile
+- `memory/calendar_events.py`: local calendar events
 - `memory/reminders.py`: reminders and routines
 - `clients/jarvin-ui/src/App.tsx`: shared client entrypoint

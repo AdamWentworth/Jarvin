@@ -41,6 +41,18 @@ async def test_middleware_suppresses_cancelled_error():
 
 
 @pytest.mark.asyncio
+async def test_middleware_reraises_cancelled_error_after_started_response():
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        raise asyncio.CancelledError()
+
+    mw = GracefulCancelMiddleware(app)
+
+    with pytest.raises(asyncio.CancelledError):
+        await mw({"type": "http"}, DummyReceive(), DummySend())
+
+
+@pytest.mark.asyncio
 async def test_middleware_does_not_suppress_other_exceptions():
     class CustomError(Exception):
         pass

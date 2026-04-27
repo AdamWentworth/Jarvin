@@ -22,13 +22,18 @@ Desktop and phone clients then connect to that host over local network or WireGu
 - remote phone voice:
   - phone microphone capture
   - host-side transcription
+  - voice transcript confidence review before acting on shaky ASR
   - phone speaker playback of Jarvin replies
 - SQLite-backed profile and conversation memory
 - reminders and routines
+- mobile system notifications for synced reminders
 - morning briefs that combine weather, calendar, and reminders
-- Google Calendar integration with event CRUD
+- built-in local calendar with event CRUD and simple recurring events
 - DuckDuckGo-backed web research with page fetch and summarization
 - safe host-side assistant tools for workspace and repo tasks
+- approval cards, session/chat trust, and a host action audit log
+- task-scoped host plans with task cards and live progress updates
+- server-sent events for listener and task state updates
 - natural-language planners for:
   - weather
   - calendar
@@ -162,21 +167,15 @@ Validate search:
 .\.venv\Scripts\python scripts\validate_integrations.py --search-only --query "llama.cpp windows cuda docs"
 ```
 
-### Google Calendar
+### Built-In Calendar
 
-Save your OAuth desktop client JSON at:
+Jarvin now keeps its own calendar locally in the same SQLite database as the rest of its durable state.
 
-```text
-secrets/google-calendar-client.json
-```
+- storage: `data/jarvin.sqlite3`
+- table: `calendar_events`
+- setup: none
 
-Then ask Jarvin:
-
-```text
-connect my Google Calendar
-```
-
-Validate calendar setup:
+Validate calendar storage:
 
 ```powershell
 .\.venv\Scripts\python scripts\validate_integrations.py --calendar-only
@@ -190,7 +189,10 @@ Important paths:
 - `config.py`: settings and `.env` loading
 - `backend/api/app.py`: FastAPI app assembly
 - `backend/api/routes/chat.py`: chat endpoint
-- `backend/agent/chat_tools.py`: planner and tool router
+- `backend/agent/chat/assistant_chat_tools.py`: central planner and tool router
+- `backend/agent/tasks`: task-scoped host planning and execution
+- `backend/agent/voice`: voice transcription review and local-listener clarification
+- `memory/calendar_events.py`: local calendar storage
 - `memory/conversation.py`: conversations and profile
 - `memory/reminders.py`: reminders and routines
 - `clients/jarvin-ui`: shared desktop/mobile client

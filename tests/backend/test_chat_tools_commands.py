@@ -112,8 +112,6 @@ def test_reminder_command_uses_reminder_tooling(monkeypatch):
 
 
 def test_calendar_command_formats_agenda(monkeypatch):
-    monkeypatch.setattr(chat_tool_helpers, "google_calendar_credentials_configured", lambda: True, raising=True)
-    monkeypatch.setattr(chat_tool_helpers, "google_calendar_token_available", lambda: True, raising=True)
     monkeypatch.setattr(
         chat_tool_helpers,
         "get_calendar_agenda",

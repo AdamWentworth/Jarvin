@@ -43,6 +43,24 @@ CALENDAR_LOOKUP_HINTS = (
     "what have i got",
     "what do i have going on",
 )
+CALENDAR_CONTEXT_ACTION_HINTS = (
+    "move",
+    "reschedule",
+    "shift",
+    "postpone",
+    "delay",
+    "delete",
+    "remove",
+    "cancel",
+    "rename",
+    "retitle",
+    "update",
+    "change",
+    "details",
+    "location",
+    "notes",
+    "description",
+)
 CALENDAR_CREATE_PREFIXES = (
     "add ",
     "create ",
@@ -56,6 +74,41 @@ CALENDAR_CREATE_PREFIXES = (
 CALENDAR_DELETE_PREFIXES = ("delete ", "remove ", "cancel ", "please delete ", "please remove ", "please cancel ")
 CALENDAR_MOVE_PREFIXES = ("move ", "reschedule ", "shift ", "postpone ", "delay ", "please move ", "please reschedule ")
 CALENDAR_RENAME_PREFIXES = ("rename ", "retitle ", "please rename ", "please retitle ")
+CALENDAR_CREATE_VERB_HINTS = (
+    "make",
+    "set up",
+    "setup",
+    "book",
+    "schedule",
+    "add",
+    "create",
+    "put",
+)
+
+_DATE_HINT_PATTERNS = (
+    r"\b\d{4}-\d{2}-\d{2}\b",
+    r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b",
+    r"\bnext week\b",
+    r"\bthis week\b",
+    r"\btoday\b",
+    r"\btomorrow\b",
+    r"\btonight\b",
+    r"\bthis morning\b",
+    r"\bthis afternoon\b",
+    r"\bthis evening\b",
+    r"\bnext (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+)
+_TIME_HINT_PATTERNS = (
+    r"\b(?:around|at)\s+\d{1,2}\s+noon\b",
+    r"\b(?:around|at)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b",
+    r"\b(?:around|at)\s+\d{1,2}:\d{2}\b",
+    r"\b(?:around|at)\s+(?:noon|midnight)\b",
+    r"\b(?:around\s+)?\d{1,2}\s+noon\b",
+    r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b",
+    r"\b(?:noon|midnight)\b",
+    r"\b(?:this\s+)?(?:morning|afternoon|evening)\b",
+)
 
 
 def is_explicit_calendar_lookup(lower: str) -> bool:
@@ -96,7 +149,9 @@ def looks_calendar_related(message: str, context: Any | None) -> bool:
         return True
     if context is None:
         return False
-    return any(token in lower for token in CALENDAR_FOLLOW_UP_HINTS) or uses_calendar_context(lower)
+    if getattr(context, "pending_create_title", None) and has_temporal_hint(message):
+        return True
+    return any(token in lower for token in CALENDAR_FOLLOW_UP_HINTS) or uses_calendar_context_for_routing(lower)
 
 
 def infer_window_days(lower: str) -> int:
@@ -142,12 +197,81 @@ def clean_text(value: object) -> str | None:
     return cleaned or None
 
 
+def normalize_calendar_create_text(message: str) -> str | None:
+    text = clean_text(message) or ""
+    if not text:
+        return None
+    text = re.sub(r"^(?:hey|hi|hello)\s+jar(?:vin|van)\b[\s,!\-]*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^(?:can|could|would|will)\s+you\s+(?:please\s+)?", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^(?:please\s+)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^(?:i\s+was\s+thinking\s+of|i(?:'m| am)\s+thinking\s+of)\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"^(?:make|set up|setup|book|create|schedule|add|put)\s+"
+        r"(?:(?:me|us)\s+)?(?:an?\s+)?(?:appointment|event|meeting)\s+(?:for|to)\s+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"^(?:make|set up|setup|book|create|schedule|add|put)\s+"
+        r"(?:(?:me|us)\s+)?(?:down\s+for\s+)?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\s+(?:on|in|to)\s+(?:my\s+)?calendar\b", "", text, flags=re.IGNORECASE)
+    return clean_text(text)
+
+
+def looks_like_calendar_create_request(message: str, *, context: Any | None) -> bool:
+    lower = str(message or "").strip().lower()
+    if not lower:
+        return False
+    if context is not None and getattr(context, "pending_create_title", None) and has_temporal_hint(message):
+        return True
+    if not has_temporal_hint(message):
+        return False
+    if starts_with_any(lower, CALENDAR_CREATE_PREFIXES):
+        return True
+    if any(noun in lower for noun in ("appointment", "meeting", "event")) and any(verb in lower for verb in CALENDAR_CREATE_VERB_HINTS):
+        return True
+    return False
+
+
+def has_temporal_hint(message: str) -> bool:
+    return extract_date_hint(message) is not None or extract_time_hint(message) is not None
+
+
+def extract_date_hint(message: str) -> str | None:
+    lower = str(message or "").strip().lower()
+    for pattern in _DATE_HINT_PATTERNS:
+        match = re.search(pattern, lower, flags=re.IGNORECASE)
+        if match:
+            return clean_text(match.group(0))
+    return None
+
+
+def extract_time_hint(message: str) -> str | None:
+    lower = str(message or "").strip().lower()
+    for pattern in _TIME_HINT_PATTERNS:
+        match = re.search(pattern, lower, flags=re.IGNORECASE)
+        if match:
+            return clean_text(match.group(0))
+    return None
+
+
 def starts_with_any(lower: str, prefixes: tuple[str, ...]) -> bool:
     return any(lower.startswith(prefix) for prefix in prefixes)
 
 
 def uses_calendar_context(lower: str) -> bool:
     return any(token in lower for token in CALENDAR_PRONOUN_HINTS)
+
+
+def uses_calendar_context_for_routing(lower: str) -> bool:
+    if any(phrase in lower for phrase in ("that meeting", "this meeting", "that event", "this event", "that appointment", "this appointment")):
+        return True
+    return uses_calendar_context(lower) and any(token in lower for token in CALENDAR_CONTEXT_ACTION_HINTS)
 
 
 def strip_calendar_create_prefix(message: str) -> str | None:

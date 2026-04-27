@@ -60,3 +60,12 @@ def test_format_sse_includes_event_id_and_payload():
     assert "id: 3" in formatted
     assert "event: live" in formatted
     assert '"event_conversation_id": 5' in formatted
+
+
+def test_server_should_exit_detects_uvicorn_shutdown_flag():
+    class State:
+        uvicorn_server = type("Server", (), {"should_exit": True, "force_exit": False})()
+
+    request = type("Request", (), {"app": type("App", (), {"state": State()})()})()
+
+    assert live_mod._server_should_exit(request) is True

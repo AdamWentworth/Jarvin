@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+
+def maybe_handle_pending_confirmation_adapter(
+    text: str,
+    *,
+    conversation_id,
+    client_session_id,
+    ToolChatResponse,
+    maybe_handle_pending_confirmation_impl,
+    get_pending_host_approval,
+    normalize_confirmation_text,
+    cancel_patterns,
+    confirm_patterns,
+    trust_conversation_patterns,
+    trust_session_patterns,
+    update_latest_tool_turn,
+    build_approval_payload,
+    clear_pending_host_approval,
+    grant_host_action_trust,
+    execute_pending_host_approval,
+    get_pending_host_task,
+    clear_pending_host_task,
+    build_host_task_payload,
+    execute_pending_host_task,
+    log_agent_action_event,
+    get_pending_calendar_action,
+    clear_pending_calendar_action,
+    delete_calendar_event,
+    reschedule_calendar_event,
+    update_calendar_event_fields,
+    calendar_field_update_success_reply,
+    get_pending_organizer_cleanup_action,
+    clear_pending_organizer_cleanup_action,
+    delete_reminder,
+    delete_local_calendar_event,
+):
+    return maybe_handle_pending_confirmation_impl(
+        text,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+        ToolChatResponse=ToolChatResponse,
+        get_pending_host_approval=get_pending_host_approval,
+        normalize_confirmation_text=normalize_confirmation_text,
+        cancel_patterns=cancel_patterns,
+        confirm_patterns=confirm_patterns,
+        trust_conversation_patterns=trust_conversation_patterns,
+        trust_session_patterns=trust_session_patterns,
+        update_latest_tool_turn=update_latest_tool_turn,
+        build_approval_payload=build_approval_payload,
+        clear_pending_host_approval=clear_pending_host_approval,
+        grant_host_action_trust=grant_host_action_trust,
+        execute_pending_host_approval=execute_pending_host_approval,
+        get_pending_host_task=get_pending_host_task,
+        clear_pending_host_task=clear_pending_host_task,
+        build_host_task_payload=build_host_task_payload,
+        execute_pending_host_task=execute_pending_host_task,
+        log_agent_action_event=log_agent_action_event,
+        get_pending_calendar_action=get_pending_calendar_action,
+        clear_pending_calendar_action=clear_pending_calendar_action,
+        delete_calendar_event=delete_calendar_event,
+        reschedule_calendar_event=reschedule_calendar_event,
+        update_calendar_event_fields=update_calendar_event_fields,
+        calendar_field_update_success_reply=calendar_field_update_success_reply,
+        get_pending_organizer_cleanup_action=get_pending_organizer_cleanup_action,
+        clear_pending_organizer_cleanup_action=clear_pending_organizer_cleanup_action,
+        delete_reminder=delete_reminder,
+        delete_local_calendar_event=delete_local_calendar_event,
+    )
+
+
+def maybe_organizer_tool_response_adapter(
+    text: str,
+    *,
+    conversation_id,
+    ToolChatResponse,
+    maybe_organizer_tool_response_impl,
+):
+    return maybe_organizer_tool_response_impl(
+        text,
+        conversation_id=conversation_id,
+        ToolChatResponse=ToolChatResponse,
+    )
+
+
+def maybe_compound_tool_response_adapter(
+    text: str,
+    *,
+    conversation_id,
+    ToolChatResponse,
+    maybe_compound_tool_response_impl,
+    maybe_plan_compound_tool_request,
+    maybe_handle_reminder_request,
+    maybe_calendar_tool_response,
+):
+    return maybe_compound_tool_response_impl(
+        text,
+        conversation_id=conversation_id,
+        ToolChatResponse=ToolChatResponse,
+        maybe_plan_compound_tool_request=maybe_plan_compound_tool_request,
+        maybe_handle_reminder_request=maybe_handle_reminder_request,
+        maybe_calendar_tool_response=maybe_calendar_tool_response,
+    )

@@ -27,6 +27,20 @@ from backend.agent.chat.chat_domain_dispatch import (
     maybe_active_follow_up_response_impl, maybe_calendar_tool_response_impl, maybe_research_tool_response_impl,
     maybe_weather_tool_response_impl, maybe_workspace_tool_response_impl, safe_weather_tool_response_impl,
 )
+from backend.agent.chat.chat_assistant_router_adapters import (
+    maybe_compound_tool_response_adapter,
+    maybe_handle_pending_confirmation_adapter,
+    maybe_organizer_tool_response_adapter,
+)
+from backend.agent.chat.chat_organizer_pending_actions import (
+    clear_pending_organizer_cleanup_action,
+    get_pending_organizer_cleanup_action,
+)
+from backend.agent.chat.chat_organizer_tools import maybe_organizer_tool_response_impl
+from backend.agent.chat.chat_compound_tool_requests import (
+    maybe_compound_tool_response_impl,
+    maybe_plan_compound_tool_request,
+)
 from backend.agent.chat.chat_domain_adapters import (
     execute_calendar_plan_adapter, execute_research_plan_adapter, maybe_calendar_tool_response_adapter,
     maybe_research_tool_response_adapter, maybe_weather_tool_response_adapter,
@@ -59,7 +73,7 @@ from backend.agent.chat.chat_host_task_adapters import (
 from backend.agent.chat.chat_host_task_request_flow import maybe_host_task_response_impl
 from backend.agent.chat.chat_pending_actions import maybe_handle_pending_confirmation_impl
 from backend.agent.integration_facade import (
-    begin_google_calendar_auth, delete_calendar_event, reschedule_calendar_event, update_calendar_event_fields,
+    begin_calendar_setup, delete_calendar_event, reschedule_calendar_event, update_calendar_event_fields,
 )
 from backend.agent.chat.chat_followup_context import get_active_follow_up_domain, remember_active_follow_up_domain
 from backend.agent.chat.chat_followup_router import has_conflicting_domain_cues, looks_like_ambiguous_follow_up
@@ -78,12 +92,12 @@ from backend.agent.tasks.host_task_state import (
 )
 from backend.agent.weather.weather_request_tools import maybe_handle_weather_request
 from backend.agent.workspace.workspace_request_tools import maybe_plan_workspace_request, remember_workspace_context
+from memory.calendar_events import delete_calendar_event as delete_local_calendar_event
 from memory.agent_action_log import log_agent_action_event
 from memory.conversation import update_latest_tool_turn
+from memory.reminders import delete_reminder
 
 tools = host_tool_runtime
-
-
 @dataclass(frozen=True)
 class ToolChatResponse:
     handled: bool
@@ -92,8 +106,6 @@ class ToolChatResponse:
     tool_payload: dict[str, object] | None = None
     active_domain: str | None = None
     persist_assistant_turn: bool = True
-
-
 def maybe_handle_assistant_tool_request(
     text: str,
     *,
@@ -101,10 +113,38 @@ def maybe_handle_assistant_tool_request(
     client_session_id: str | None = None,
     agent_access_mode: str | None = None,
 ) -> ToolChatResponse:
-    pending = _maybe_handle_pending_confirmation(
+    pending = maybe_handle_pending_confirmation_adapter(
         text,
         conversation_id=conversation_id,
         client_session_id=client_session_id,
+        ToolChatResponse=ToolChatResponse,
+        maybe_handle_pending_confirmation_impl=maybe_handle_pending_confirmation_impl,
+        get_pending_host_approval=get_pending_host_approval,
+        normalize_confirmation_text=_normalize_confirmation_text,
+        cancel_patterns=_CANCEL_PATTERNS,
+        confirm_patterns=_CONFIRM_PATTERNS,
+        trust_conversation_patterns={"trust this chat", "trust this conversation", "approve for this chat"},
+        trust_session_patterns={"trust this session", "approve for this session", "trust this device"},
+        update_latest_tool_turn=update_latest_tool_turn,
+        build_approval_payload=build_approval_payload,
+        clear_pending_host_approval=clear_pending_host_approval,
+        grant_host_action_trust=grant_host_action_trust,
+        execute_pending_host_approval=_execute_pending_host_approval,
+        get_pending_host_task=get_pending_host_task,
+        clear_pending_host_task=clear_pending_host_task,
+        build_host_task_payload=build_host_task_payload,
+        execute_pending_host_task=_execute_pending_host_task,
+        log_agent_action_event=log_agent_action_event,
+        get_pending_calendar_action=get_pending_calendar_action,
+        clear_pending_calendar_action=clear_pending_calendar_action,
+        delete_calendar_event=delete_calendar_event,
+        reschedule_calendar_event=reschedule_calendar_event,
+        update_calendar_event_fields=update_calendar_event_fields,
+        calendar_field_update_success_reply=_calendar_field_update_success_reply,
+        get_pending_organizer_cleanup_action=get_pending_organizer_cleanup_action,
+        clear_pending_organizer_cleanup_action=clear_pending_organizer_cleanup_action,
+        delete_reminder=delete_reminder,
+        delete_local_calendar_event=delete_local_calendar_event,
     )
     if pending.handled:
         return _finalize_tool_response(pending, conversation_id=conversation_id)
@@ -125,8 +165,6 @@ def maybe_handle_assistant_tool_request(
         agent_access_mode=agent_access_mode,
     )
     return _finalize_tool_response(natural, conversation_id=conversation_id)
-
-
 def maybe_handle_tool_command(
     text: str,
     *,
@@ -153,8 +191,6 @@ def maybe_handle_tool_command(
         handle_reminder_command=handle_reminder_command,
         calendar_command_reply=_calendar_command_reply,
     )
-
-
 def maybe_handle_natural_language_tool_request(
     text: str,
     *,
@@ -169,8 +205,19 @@ def maybe_handle_natural_language_tool_request(
         agent_access_mode=agent_access_mode,
         ToolChatResponse=ToolChatResponse,
         calendar_auth_re=_CALENDAR_AUTH_RE,
-        begin_google_calendar_auth=begin_google_calendar_auth,
+        begin_calendar_setup=begin_calendar_setup,
         maybe_active_follow_up_response=_maybe_active_follow_up_response,
+        maybe_organizer_tool_response=lambda text, *, conversation_id, client_session_id, agent_access_mode: maybe_organizer_tool_response_adapter(
+            text, conversation_id=conversation_id, ToolChatResponse=ToolChatResponse,
+            maybe_organizer_tool_response_impl=maybe_organizer_tool_response_impl,
+        ),
+        maybe_compound_tool_response=lambda text, *, conversation_id, client_session_id, agent_access_mode: maybe_compound_tool_response_adapter(
+            text, conversation_id=conversation_id, ToolChatResponse=ToolChatResponse,
+            maybe_compound_tool_response_impl=maybe_compound_tool_response_impl,
+            maybe_plan_compound_tool_request=maybe_plan_compound_tool_request,
+            maybe_handle_reminder_request=maybe_handle_reminder_request,
+            maybe_calendar_tool_response=_maybe_calendar_tool_response,
+        ),
         maybe_weather_tool_response=_maybe_weather_tool_response,
         maybe_handle_brief_request=maybe_handle_brief_request,
         maybe_handle_reminder_request=maybe_handle_reminder_request,
@@ -211,42 +258,6 @@ def maybe_handle_natural_language_tool_request(
         list_reply=_list_reply,
         run_re=_RUN_RE,
         guard_command_tool_response=_guard_command_tool_response,
-    )
-
-
-def _maybe_handle_pending_confirmation(
-    text: str,
-    *,
-    conversation_id: int | None,
-    client_session_id: str | None,
-) -> ToolChatResponse:
-    return maybe_handle_pending_confirmation_impl(
-        text,
-        conversation_id=conversation_id,
-        client_session_id=client_session_id,
-        ToolChatResponse=ToolChatResponse,
-        get_pending_host_approval=get_pending_host_approval,
-        normalize_confirmation_text=_normalize_confirmation_text,
-        cancel_patterns=_CANCEL_PATTERNS,
-        confirm_patterns=_CONFIRM_PATTERNS,
-        trust_conversation_patterns={"trust this chat", "trust this conversation", "approve for this chat"},
-        trust_session_patterns={"trust this session", "approve for this session", "trust this device"},
-        update_latest_tool_turn=update_latest_tool_turn,
-        build_approval_payload=build_approval_payload,
-        clear_pending_host_approval=clear_pending_host_approval,
-        grant_host_action_trust=grant_host_action_trust,
-        execute_pending_host_approval=_execute_pending_host_approval,
-        get_pending_host_task=get_pending_host_task,
-        clear_pending_host_task=clear_pending_host_task,
-        build_host_task_payload=build_host_task_payload,
-        execute_pending_host_task=_execute_pending_host_task,
-        log_agent_action_event=log_agent_action_event,
-        get_pending_calendar_action=get_pending_calendar_action,
-        clear_pending_calendar_action=clear_pending_calendar_action,
-        delete_calendar_event=delete_calendar_event,
-        reschedule_calendar_event=reschedule_calendar_event,
-        update_calendar_event_fields=update_calendar_event_fields,
-        calendar_field_update_success_reply=_calendar_field_update_success_reply,
     )
 def _execute_pending_host_approval(
     pending: PendingHostApproval,
@@ -353,6 +364,12 @@ def _dispatch_active_follow_up(
         agent_access_mode=agent_access_mode,
         maybe_weather_tool_response=_maybe_weather_tool_response,
         maybe_handle_brief_request=maybe_handle_brief_request,
+        maybe_organizer_tool_response=lambda text, *, conversation_id, client_session_id, agent_access_mode: maybe_organizer_tool_response_adapter(
+            text,
+            conversation_id=conversation_id,
+            ToolChatResponse=ToolChatResponse,
+            maybe_organizer_tool_response_impl=maybe_organizer_tool_response_impl,
+        ),
         maybe_handle_reminder_request=maybe_handle_reminder_request,
         maybe_calendar_tool_response=_maybe_calendar_tool_response,
         maybe_workspace_tool_response=_maybe_workspace_tool_response,
@@ -361,8 +378,6 @@ def _dispatch_active_follow_up(
     )
 def _safe_weather_tool_response(rest: str, *, conversation_id: int | None) -> ToolChatResponse:
     return safe_weather_tool_response_adapter(rest, conversation_id=conversation_id, ToolChatResponse=ToolChatResponse, maybe_handle_weather_request=maybe_handle_weather_request, safe_weather_tool_response_impl=safe_weather_tool_response_impl)
-
-
 def _maybe_host_task_response(
     text: str,
     *,
@@ -428,7 +443,7 @@ def _execute_calendar_plan(plan: CalendarPlan, *, raw_message: str, conversation
         raw_message=raw_message,
         conversation_id=conversation_id,
         execute_calendar_plan_impl=execute_calendar_plan_impl,
-        begin_google_calendar_auth=begin_google_calendar_auth,
+        begin_calendar_setup=begin_calendar_setup,
         calendar_lookup_reply=_calendar_lookup_reply,
         extract_calendar_create_text=_extract_calendar_create_text,
         calendar_create_reply=_calendar_create_reply,
@@ -468,8 +483,6 @@ def _execute_research_plan(plan, *, conversation_id: int | None) -> str:
         web_search_reply=_web_search_reply,
         remember_research_context=remember_research_context,
     )
-
-
 def _execute_pending_host_task(
     pending,
     *,

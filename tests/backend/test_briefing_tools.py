@@ -39,8 +39,6 @@ def test_morning_brief_combines_weather_calendar_and_reminders(monkeypatch):
         )(),
         raising=True,
     )
-    monkeypatch.setattr(briefing_tools, "google_calendar_credentials_configured", lambda: True, raising=True)
-    monkeypatch.setattr(briefing_tools, "google_calendar_token_available", lambda: True, raising=True)
     monkeypatch.setattr(
         briefing_tools,
         "get_calendar_agenda",
@@ -103,7 +101,12 @@ def test_brief_request_parser_handles_natural_language(monkeypatch):
 def test_brief_reports_missing_calendar_and_weather_location(monkeypatch):
     monkeypatch.setattr(briefing_tools, "get_user_profile", lambda: {}, raising=True)
     monkeypatch.setattr(briefing_tools.cfg.settings, "default_weather_location", "", raising=False)
-    monkeypatch.setattr(briefing_tools, "google_calendar_credentials_configured", lambda: False, raising=True)
+    monkeypatch.setattr(
+        briefing_tools,
+        "get_calendar_agenda",
+        lambda window_days=1: type("Agenda", (), {"events": []})(),
+        raising=True,
+    )
     monkeypatch.setattr(
         briefing_tools,
         "list_reminders",
@@ -114,7 +117,7 @@ def test_brief_reports_missing_calendar_and_weather_location(monkeypatch):
     reply = briefing_tools.build_morning_brief()
 
     assert "Weather: no default location is configured yet." in reply
-    assert "Calendar: not connected yet" in reply
+    assert "Calendar: no events found for today." in reply
     assert "nothing due for today" in reply
 
 
@@ -158,8 +161,6 @@ def test_morning_brief_can_target_tomorrow(monkeypatch):
         )(),
         raising=True,
     )
-    monkeypatch.setattr(briefing_tools, "google_calendar_credentials_configured", lambda: True, raising=True)
-    monkeypatch.setattr(briefing_tools, "google_calendar_token_available", lambda: True, raising=True)
     monkeypatch.setattr(
         briefing_tools,
         "get_calendar_agenda",

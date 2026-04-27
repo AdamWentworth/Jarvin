@@ -2,6 +2,19 @@
   border-top: 1px solid rgba(244, 234, 209, 0.08);
   padding: 10px 14px 12px;
   background: rgba(13, 15, 18, 0.98);
+  min-width: 0;
+  max-height: min(64dvh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.composer-shell::-webkit-scrollbar {
+  width: 8px;
+}
+
+.composer-shell::-webkit-scrollbar-thumb {
+  background: rgba(244, 234, 209, 0.14);
+  border-radius: 999px;
 }
 
 .connection-banner {
@@ -164,4 +177,10 @@
   width: 18px;
   height: 18px;
   display: block;
+}
+
+@media (max-width: 900px) {
+  .composer-shell {
+    max-height: min(58dvh, 520px);
+  }
 }

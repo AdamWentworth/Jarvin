@@ -22,6 +22,7 @@ from memory.reminders import (
     create_reminder,
     delete_reminder,
     find_reminders,
+    get_reminder,
     list_due_reminders,
     list_reminders,
     update_reminder,
@@ -55,11 +56,19 @@ _COMPLETE_RE = re.compile(
     re.IGNORECASE,
 )
 _DELETE_RE = re.compile(
-    r"^(?:please\s+)?(?:delete|remove|cancel)\s+(?:the\s+)?(?:reminder|task|to-?do)\s+(?P<query>.+)$",
+    r"^(?:please\s+)?(?:delete|remove|cancel)\s+(?:the\s+)?(?:reminder|reminders|task|tasks|to-?do|to-?dos)\s+(?P<query>.+)$",
+    re.IGNORECASE,
+)
+_DELETE_RECENT_LIST_RE = re.compile(
+    r"^(?:please\s+)?(?:delete|remove|cancel)\s+(?P<query>(?:the\s+)?(?:two|2|both|all|those|these|all of them|all of those)\s+(?:reminders|tasks|to-?dos))$",
     re.IGNORECASE,
 )
 _MOVE_RE = re.compile(
     r"^(?:please\s+)?(?:move|reschedule|delay|postpone)\s+(?:the\s+)?(?:reminder|task|to-?do)\s+(?P<query>.+?)\s+to\s+(?P<when>.+)$",
+    re.IGNORECASE,
+)
+_RECENT_LIST_BULK_RE = re.compile(
+    r"\b(?:both|all|those|these|the two|the 2|two reminders|2 reminders|two tasks|2 tasks|all of them|all of those|those reminders|these reminders)\b",
     re.IGNORECASE,
 )
 
@@ -95,6 +104,10 @@ def maybe_handle_reminder_request(text: str, *, conversation_id: int | None = No
         complete_match = _COMPLETE_RE.search(message)
         if complete_match:
             return _complete_reply(_clean_text(complete_match.group("query")), conversation_id=conversation_id)
+
+        bulk_delete_match = _DELETE_RECENT_LIST_RE.search(message)
+        if bulk_delete_match:
+            return _delete_reply(_clean_text(bulk_delete_match.group("query")), conversation_id=conversation_id)
 
         delete_match = _DELETE_RE.search(message)
         if delete_match:
@@ -297,7 +310,12 @@ def _list_reply(*, routines_only: bool, window: str, conversation_id: int | None
         reminders = sorted(reminders, key=lambda item: item["due_at"])
         if not reminders:
             return "You do not have any active routines yet."
-        remember_reminder_context(conversation_id, action="list_routines", last_title=str(reminders[0]["title"]))
+        remember_reminder_context(
+            conversation_id,
+            action="list_routines",
+            last_title=str(reminders[0]["title"]),
+            last_listed_ids=[int(item["id"]) for item in reminders[:20]],
+        )
         lines = [
             f"- `{item['title']}` at `{display_due(item['due_at'])}` (`{item['recurrence']}`)"
             for item in reminders[:20]
@@ -333,7 +351,12 @@ def _list_reply(*, routines_only: bool, window: str, conversation_id: int | None
     if not reminders:
         return f"You do not have any pending reminders for {label}."
 
-    remember_reminder_context(conversation_id, action="list", last_title=str(reminders[0]["title"]))
+    remember_reminder_context(
+        conversation_id,
+        action="list",
+        last_title=str(reminders[0]["title"]),
+        last_listed_ids=[int(item["id"]) for item in reminders[:20]],
+    )
     lines = []
     for item in reminders[:20]:
         recurrence = f" ({item['recurrence']})" if item["recurrence"] != "once" else ""
@@ -356,6 +379,15 @@ def _complete_reply(query: str, *, conversation_id: int | None = None) -> str:
 
 
 def _delete_reply(query: str, *, conversation_id: int | None = None) -> str:
+    bulk_matches = _recent_list_bulk_matches(query, conversation_id=conversation_id, include_done=True)
+    if bulk_matches is not None:
+        deleted = [delete_reminder(int(item["id"])) for item in bulk_matches]
+        clear_reminder_context(conversation_id)
+        if len(deleted) == 1:
+            return f"Deleted reminder `{deleted[0]['title']}`."
+        titles = ", ".join(f"`{item['title']}`" for item in deleted)
+        return f"Deleted {len(deleted)} reminders: {titles}."
+
     matches = find_reminders(query, include_done=True, limit=5)
     reminder = _pick_single_match(matches, query)
     deleted = delete_reminder(int(reminder["id"]))
@@ -421,6 +453,34 @@ def _pick_single_match(matches: list[dict[str, object]], query: str) -> dict[str
         lines = [f"- `{item['title']}` due `{display_due(str(item['due_at']))}`" for item in matches[:5]]
         raise ValueError("I found multiple matching reminders. Please be more specific:\n" + "\n".join(lines))
     return matches[0]
+
+
+def _recent_list_bulk_matches(
+    query: str,
+    *,
+    conversation_id: int | None,
+    include_done: bool,
+) -> list[dict[str, object]] | None:
+    cleaned = _clean_text(query or "")
+    context = get_reminder_context(conversation_id)
+    if context is None or not context.last_listed_ids:
+        return None
+    if not cleaned or not _RECENT_LIST_BULK_RE.search(cleaned):
+        return None
+
+    matches: list[dict[str, object]] = []
+    for reminder_id in context.last_listed_ids:
+        try:
+            reminder = get_reminder(int(reminder_id))
+        except ValueError:
+            continue
+        if not include_done and reminder["status"] != "pending":
+            continue
+        matches.append(reminder)
+
+    if not matches:
+        raise ValueError("I couldn't find those recently listed reminders anymore.")
+    return matches
 
 
 def _infer_list_window(message: str) -> str:

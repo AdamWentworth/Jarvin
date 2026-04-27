@@ -57,3 +57,22 @@ def test_launch_repo_venv_skips_when_repo_venv_is_missing(tmp_path):
     )
 
     assert rc is None
+
+
+def test_launch_repo_venv_treats_keyboard_interrupt_as_clean_exit(tmp_path):
+    target = tmp_path / ".venv" / "Scripts" / "python.exe"
+    target.parent.mkdir(parents=True)
+    target.write_text("")
+
+    def interrupted_run(cmd, env):
+        raise KeyboardInterrupt()
+
+    rc = server._launch_repo_venv_if_needed(
+        script_path=tmp_path / "server.py",
+        argv=["server.py"],
+        current_executable=r"C:\Python313\python.exe",
+        environ={},
+        run_cmd=interrupted_run,
+    )
+
+    assert rc == 0

@@ -5,29 +5,26 @@ from datetime import datetime, timedelta, timezone
 
 
 @dataclass(frozen=True)
-class PendingCalendarAction:
-    action: str
-    event_id: str
-    title: str
-    starts_at: str
-    calendar_id: str = "local"
-    new_start_iso: str | None = None
-    new_end_iso: str | None = None
-    new_title: str | None = None
-    new_location: str | None = None
-    new_description: str | None = None
+class PendingOrganizerCleanupAction:
+    reminder_ids: tuple[int, ...] = ()
+    calendar_event_ids: tuple[int, ...] = ()
+    keep_labels: tuple[str, ...] = ()
+    delete_labels: tuple[str, ...] = ()
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=10))
 
 
-_pending_actions: dict[str, PendingCalendarAction] = {}
+_pending_actions: dict[str, PendingOrganizerCleanupAction] = {}
 
 
-def set_pending_calendar_action(conversation_id: int | None, action: PendingCalendarAction) -> None:
+def set_pending_organizer_cleanup_action(
+    conversation_id: int | None,
+    action: PendingOrganizerCleanupAction,
+) -> None:
     _pending_actions[_key(conversation_id)] = action
 
 
-def get_pending_calendar_action(conversation_id: int | None) -> PendingCalendarAction | None:
+def get_pending_organizer_cleanup_action(conversation_id: int | None) -> PendingOrganizerCleanupAction | None:
     key = _key(conversation_id)
     action = _pending_actions.get(key)
     if action is None:
@@ -38,7 +35,7 @@ def get_pending_calendar_action(conversation_id: int | None) -> PendingCalendarA
     return action
 
 
-def clear_pending_calendar_action(conversation_id: int | None) -> None:
+def clear_pending_organizer_cleanup_action(conversation_id: int | None) -> None:
     _pending_actions.pop(_key(conversation_id), None)
 
 

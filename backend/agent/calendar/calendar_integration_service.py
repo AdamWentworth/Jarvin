@@ -1,10 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import re
 
 import config as cfg
+from backend.agent.calendar.calendar_request_nlu import extract_date_hint, extract_time_hint, normalize_calendar_create_text
 from backend.agent.calendar.calendar_datetime_utils import parse_event_datetime, parse_when_text
 from backend.agent.integration_models import (
     CalendarAgendaResult,
@@ -12,301 +13,372 @@ from backend.agent.integration_models import (
     CalendarEventMatch,
     CalendarEventSummary,
 )
+from backend.agent.reminders.reminder_datetime_utils import parse_due_text, parse_recurring_schedule
+from memory.calendar_events import (
+    create_calendar_event,
+    delete_calendar_event as delete_local_calendar_event,
+    find_calendar_events as find_local_calendar_events,
+    get_calendar_event,
+    list_calendar_occurrences,
+    next_calendar_occurrence,
+    recurrence_label,
+    update_calendar_event,
+)
 
-GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+LOCAL_CALENDAR_LABEL = "Jarvin Calendar"
+DEFAULT_EVENT_DURATION = timedelta(hours=1)
+_SCHEDULE_PATTERN = (
+    r"(?:every day|each day|daily|every weekday|each weekday|"
+    r"weekly|every week(?:\s+on)?\s+\w+|every\s+"
+    r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))"
+)
+_RECURRING_PREFIX_RE = re.compile(
+    rf"^(?P<schedule>{_SCHEDULE_PATTERN})(?:\s+at\s+(?P<time>[^,]+?))?\s+(?P<title>.+)$",
+    re.IGNORECASE,
+)
+_RECURRING_SUFFIX_RE = re.compile(
+    rf"^(?P<title>.+?)\s+(?P<schedule>{_SCHEDULE_PATTERN})(?:\s+at\s+(?P<time>.+))?$",
+    re.IGNORECASE,
+)
+_RELATIVE_RE = re.compile(r"\bin\s+\d+\s+(?:minutes?|hours?|days?)\b", re.IGNORECASE)
+_TRAILING_SCHEDULE_RE = re.compile(
+    r"^(?P<title>.+?)\s+(?P<when>(?:in\s+\d+\s+(?:minutes?|hours?|days?)|today|tomorrow|tonight|"
+    r"this morning|this afternoon|this evening|next week|next\s+"
+    r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+    r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+    r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?)"
+    r"(?:\s+(?:at|around)\s+.+)?)$",
+    re.IGNORECASE,
+)
+_TIME_ONLY_RE = re.compile(r"^(?P<title>.+?)\s+(?P<when>(?:at|around)\s+.+)$", re.IGNORECASE)
+_DURATION_RE = re.compile(r"^(?P<body>.+?)\s+for\s+(?P<count>\d+)\s+(?P<unit>minutes?|hours?)$", re.IGNORECASE)
 
 
-def google_calendar_credentials_configured() -> bool:
-    return Path(cfg.settings.google_calendar_credentials_file).resolve().is_file()
+class CalendarCreateNeedsMoreDetail(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        title: str,
+        missing: str,
+        date_hint: str | None = None,
+        time_hint: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.title = title
+        self.missing = missing
+        self.date_hint = date_hint
+        self.time_hint = time_hint
 
 
-def google_calendar_token_available() -> bool:
-    return Path(cfg.settings.google_calendar_token_file).resolve().is_file()
+@dataclass(frozen=True)
+class CalendarCreateDraft:
+    title: str
+    starts_at: datetime
+    ends_at: datetime
+    recurrence: str = "once"
+    location: str = ""
+    description: str = ""
 
 
-def begin_google_calendar_auth() -> str:
-    creds = _load_google_credentials(interactive=True)
-    token_path = Path(cfg.settings.google_calendar_token_file).resolve()
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(creds.to_json(), encoding="utf-8")
-    return f"Google Calendar authorization complete on the host machine. Token saved to `{token_path}`."
+def calendar_is_ready() -> bool:
+    return True
+
+
+def begin_calendar_setup() -> str:
+    return (
+        "Jarvin's built-in calendar is ready on this host. "
+        f"Events are stored locally in `{cfg.settings.db_path}` under the `calendar_events` table, "
+        "so no Google account or OAuth setup is required."
+    )
 
 
 def get_calendar_agenda(*, window_days: int = 7) -> CalendarAgendaResult:
-    service = _get_calendar_service(interactive=False)
-    now = datetime.now(timezone.utc)
-    upper = now + timedelta(days=max(1, int(window_days)))
-    events_result = (
-        service.events()
-        .list(
-            calendarId=cfg.settings.google_calendar_id,
-            timeMin=now.isoformat(),
-            timeMax=upper.isoformat(),
-            maxResults=max(1, int(cfg.settings.google_calendar_max_events)),
-            singleEvents=True,
-            orderBy="startTime",
-        )
-        .execute()
-    )
-    items = events_result.get("items", [])
+    lower, upper = _calendar_window_bounds(window_days)
+    limit = max(1, int(cfg.settings.calendar_max_events))
+    occurrences = list_calendar_occurrences(lower=lower, upper=upper, limit=limit)
     events = [
         CalendarEventSummary(
-            starts_at=_format_google_event_start(item.get("start", {})),
-            title=item.get("summary") or "(untitled event)",
-            location=item.get("location") or "",
+            starts_at=_format_display_time(item["starts_at"]),
+            title=str(item["title"]),
+            location=str(item.get("location") or ""),
         )
-        for item in items
+        for item in occurrences
     ]
     return CalendarAgendaResult(
-        calendar_id=cfg.settings.google_calendar_id,
+        calendar_id=LOCAL_CALENDAR_LABEL,
         window_days=max(1, int(window_days)),
         events=events,
     )
 
 
 def create_calendar_event_from_text(text: str) -> CalendarEventSummary:
-    details = str(text or "").strip()
-    if not details:
-        raise ValueError("I need event details before I can create a calendar event.")
-
-    service = _get_calendar_service(interactive=False)
-    event = (
-        service.events()
-        .quickAdd(
-            calendarId=cfg.settings.google_calendar_id,
-            text=details,
-            sendUpdates="none",
-        )
-        .execute()
+    draft = _parse_calendar_create_draft(text)
+    created = create_calendar_event(
+        draft.title,
+        starts_at=draft.starts_at,
+        ends_at=draft.ends_at,
+        recurrence=draft.recurrence,
+        location=draft.location,
+        description=draft.description,
     )
-    return _event_to_summary(event)
+    occurrence = next_calendar_occurrence(created["id"])
+    return CalendarEventSummary(
+        starts_at=_format_display_time(str(occurrence["starts_at"])),
+        title=str(created["title"]),
+        location=str(created.get("location") or ""),
+    )
 
 
 def find_calendar_events(query: str, *, window_days: int = 30, max_results: int = 5) -> list[CalendarEventMatch]:
-    text = str(query or "").strip()
-    if not text:
-        raise ValueError("I need an event name or description to search your calendar.")
-
-    service = _get_calendar_service(interactive=False)
-    now = datetime.now(timezone.utc)
-    upper = now + timedelta(days=max(1, int(window_days)))
-    response = (
-        service.events()
-        .list(
-            calendarId=cfg.settings.google_calendar_id,
-            timeMin=now.isoformat(),
-            timeMax=upper.isoformat(),
-            q=text,
-            maxResults=max(1, int(max_results)),
-            singleEvents=True,
-            orderBy="startTime",
+    matches = find_local_calendar_events(query, window_days=window_days, limit=max_results)
+    return [
+        CalendarEventMatch(
+            event_id=str(item["event_id"]),
+            title=str(item["title"]),
+            starts_at=str(item["starts_at"]),
+            ends_at=str(item["ends_at"]),
+            location=str(item.get("location") or ""),
+            description=_display_description(str(item.get("description") or ""), str(item.get("recurrence") or "once")),
+            calendar_id="local",
         )
-        .execute()
+        for item in matches
+    ]
+
+
+def get_calendar_event_details(event_id: str, *, calendar_id: str | None = None) -> CalendarEventDetails:
+    stored = get_calendar_event(event_id)
+    occurrence = next_calendar_occurrence(event_id)
+    return CalendarEventDetails(
+        event_id=str(stored["id"]),
+        calendar_id="local",
+        starts_at=_format_display_time(str(occurrence["starts_at"])),
+        ends_at=_format_display_time(str(occurrence["ends_at"])),
+        title=str(stored["title"]),
+        location=str(stored.get("location") or ""),
+        description=_display_description(str(stored.get("description") or ""), str(stored.get("recurrence") or "once")),
     )
-    return [_event_to_match(item) for item in response.get("items", [])]
 
 
-def get_calendar_event_details(event_id: str) -> CalendarEventDetails:
-    target_id = str(event_id or "").strip()
-    if not target_id:
-        raise ValueError("Missing calendar event id.")
-
-    service = _get_calendar_service(interactive=False)
-    event = service.events().get(calendarId=cfg.settings.google_calendar_id, eventId=target_id).execute()
-    return _event_to_details(event)
-
-
-def delete_calendar_event(event_id: str) -> CalendarEventSummary:
-    target_id = str(event_id or "").strip()
-    if not target_id:
-        raise ValueError("Missing calendar event id.")
-
-    service = _get_calendar_service(interactive=False)
-    event = service.events().get(calendarId=cfg.settings.google_calendar_id, eventId=target_id).execute()
-    summary = _event_to_summary(event)
-    service.events().delete(calendarId=cfg.settings.google_calendar_id, eventId=target_id, sendUpdates="none").execute()
-    return summary
+def delete_calendar_event(event_id: str, *, calendar_id: str | None = None) -> CalendarEventSummary:
+    stored = get_calendar_event(event_id)
+    occurrence = next_calendar_occurrence(event_id)
+    delete_local_calendar_event(event_id)
+    return CalendarEventSummary(
+        starts_at=_format_display_time(str(occurrence["starts_at"])),
+        title=str(stored["title"]),
+        location=str(stored.get("location") or ""),
+    )
 
 
 def update_calendar_event_fields(
     event_id: str,
     *,
+    calendar_id: str | None = None,
     title: str | None = None,
     location: str | None = None,
     description: str | None = None,
     new_start_iso: str | None = None,
     new_end_iso: str | None = None,
 ) -> CalendarEventDetails:
-    target_id = str(event_id or "").strip()
-    if not target_id:
-        raise ValueError("Missing calendar event id.")
-
-    body: dict[str, Any] = {}
-    if title is not None:
-        body["summary"] = title
-    if location is not None:
-        body["location"] = location
-    if description is not None:
-        body["description"] = description
-
-    service = _get_calendar_service(interactive=False)
     if new_start_iso is not None or new_end_iso is not None:
         if not new_start_iso or not new_end_iso:
             raise ValueError("Both the new start and end time are required when rescheduling an event.")
-        existing = service.events().get(calendarId=cfg.settings.google_calendar_id, eventId=target_id).execute()
-        timezone_name = (
-            existing.get("start", {}).get("timeZone")
-            or existing.get("end", {}).get("timeZone")
-            or "UTC"
-        )
-        body["start"] = {"dateTime": new_start_iso, "timeZone": timezone_name}
-        body["end"] = {"dateTime": new_end_iso, "timeZone": timezone_name}
-
-    if not body:
-        raise ValueError("I need at least one calendar field to update.")
-
-    patched = (
-        service.events()
-        .patch(
-            calendarId=cfg.settings.google_calendar_id,
-            eventId=target_id,
-            body=body,
-            sendUpdates="none",
-        )
-        .execute()
+    updated = update_calendar_event(
+        event_id,
+        title=title,
+        location=location,
+        description=description,
+        starts_at=new_start_iso,
+        ends_at=new_end_iso,
     )
-    return _event_to_details(patched)
+    occurrence = next_calendar_occurrence(updated["id"])
+    return CalendarEventDetails(
+        event_id=str(updated["id"]),
+        calendar_id="local",
+        starts_at=_format_display_time(str(occurrence["starts_at"])),
+        ends_at=_format_display_time(str(occurrence["ends_at"])),
+        title=str(updated["title"]),
+        location=str(updated.get("location") or ""),
+        description=_display_description(str(updated.get("description") or ""), str(updated.get("recurrence") or "once")),
+    )
 
 
-def reschedule_calendar_event(event_id: str, *, new_start_iso: str, new_end_iso: str) -> CalendarEventSummary:
-    target_id = str(event_id or "").strip()
-    if not target_id:
-        raise ValueError("Missing calendar event id.")
-
-    patched = update_calendar_event_fields(
-        target_id,
+def reschedule_calendar_event(
+    event_id: str,
+    *,
+    calendar_id: str | None = None,
+    new_start_iso: str,
+    new_end_iso: str,
+) -> CalendarEventSummary:
+    updated = update_calendar_event_fields(
+        event_id,
         new_start_iso=new_start_iso,
         new_end_iso=new_end_iso,
     )
     return CalendarEventSummary(
-        starts_at=patched.starts_at,
-        title=patched.title,
-        location=patched.location,
+        starts_at=updated.starts_at,
+        title=updated.title,
+        location=updated.location,
     )
 
 
 def prepare_reschedule_times(event: CalendarEventMatch, when_text: str) -> tuple[str, str]:
     start_dt = parse_event_datetime(event.starts_at)
     end_dt = parse_event_datetime(event.ends_at)
-    duration = end_dt - start_dt if end_dt > start_dt else timedelta(hours=1)
+    duration = end_dt - start_dt if end_dt > start_dt else DEFAULT_EVENT_DURATION
     new_start = parse_when_text(when_text, base_start=start_dt)
     new_end = new_start + duration
     return new_start.isoformat(), new_end.isoformat()
 
 
-def _load_google_credentials(*, interactive: bool):
-    creds_path = Path(cfg.settings.google_calendar_credentials_file).resolve()
-    if not creds_path.is_file():
-        raise ValueError(
-            "Google Calendar credentials are not configured yet. "
-            f"Put your OAuth desktop client JSON at `{creds_path}` first."
-        )
+def _parse_calendar_create_draft(text: str) -> CalendarCreateDraft:
+    details = _clean_text(normalize_calendar_create_text(text) or text)
+    if not details:
+        raise ValueError("I need event details before I can create a calendar event.")
 
-    try:
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
-    except ImportError as exc:
-        raise RuntimeError(
-            "Google Calendar dependencies are missing. Install the updated Jarvin requirements first."
-        ) from exc
+    body, duration = _extract_duration(details)
+    recurring = _parse_recurring_draft(body, duration=duration)
+    if recurring is not None:
+        return recurring
 
-    token_path = Path(cfg.settings.google_calendar_token_file).resolve()
-    creds = None
-    if token_path.is_file():
-        creds = Credentials.from_authorized_user_file(str(token_path), GOOGLE_CALENDAR_SCOPES)
+    single = _parse_one_time_draft(body, duration=duration)
+    if single is not None:
+        return single
 
-    if creds and not creds.has_scopes(GOOGLE_CALENDAR_SCOPES):
-        if not interactive:
-            raise ValueError(
-                "Google Calendar needs to be re-authorized on this host because Jarvin now requests broader calendar permissions. "
-                "Ask me to connect your Google Calendar again."
-            )
-        creds = None
-
-    if creds and creds.valid:
-        return creds
-
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        token_path.write_text(creds.to_json(), encoding="utf-8")
-        return creds
-
-    if not interactive:
-        raise ValueError(
-            "Google Calendar is not authorized on this host yet. Ask me to connect your Google Calendar and I will start the OAuth flow."
-        )
-
-    flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), GOOGLE_CALENDAR_SCOPES)
-    return flow.run_local_server(port=0)
-
-
-def _get_calendar_service(*, interactive: bool):
-    creds = _load_google_credentials(interactive=interactive)
-    token_path = Path(cfg.settings.google_calendar_token_file).resolve()
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(creds.to_json(), encoding="utf-8")
-    try:
-        from googleapiclient.discovery import build
-    except ImportError as exc:
-        raise RuntimeError(
-            "Google Calendar dependencies are missing. Install the updated Jarvin requirements first."
-        ) from exc
-    return build("calendar", "v3", credentials=creds)
-
-
-def _format_google_event_start(start: dict[str, Any]) -> str:
-    value = start.get("dateTime") or start.get("date") or ""
-    if not value:
-        return "Unknown time"
-    normalized = value.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return value
-    if parsed.tzinfo is None:
-        return parsed.strftime("%Y-%m-%d")
-    return parsed.astimezone().strftime("%Y-%m-%d %I:%M %p")
-
-
-def _event_to_summary(event: dict[str, Any]) -> CalendarEventSummary:
-    return CalendarEventSummary(
-        starts_at=_format_google_event_start(event.get("start", {})),
-        title=event.get("summary") or "(untitled event)",
-        location=event.get("location") or "",
+    raise ValueError(
+        "I can add that once you give me a date and time, like `lunch with Sam tomorrow at noon` "
+        "or `project sync every Saturday at 9am`."
     )
 
 
-def _event_to_match(event: dict[str, Any]) -> CalendarEventMatch:
-    return CalendarEventMatch(
-        event_id=event.get("id") or "",
-        title=event.get("summary") or "(untitled event)",
-        starts_at=event.get("start", {}).get("dateTime") or event.get("start", {}).get("date") or "",
-        ends_at=event.get("end", {}).get("dateTime") or event.get("end", {}).get("date") or "",
-        location=event.get("location") or "",
-        description=event.get("description") or "",
+def _parse_recurring_draft(text: str, *, duration: timedelta) -> CalendarCreateDraft | None:
+    prefix_match = _RECURRING_PREFIX_RE.match(text)
+    if prefix_match:
+        schedule = prefix_match.group("schedule")
+        time_hint = prefix_match.group("time")
+        title = _clean_text(prefix_match.group("title"))
+        recurrence, starts_at = parse_recurring_schedule(schedule, time_hint=time_hint)
+        return _build_create_draft(title, starts_at, duration=duration, recurrence=recurrence)
+
+    suffix_match = _RECURRING_SUFFIX_RE.match(text)
+    if suffix_match:
+        title = _clean_text(suffix_match.group("title"))
+        schedule = suffix_match.group("schedule")
+        time_hint = suffix_match.group("time")
+        recurrence, starts_at = parse_recurring_schedule(schedule, time_hint=time_hint)
+        return _build_create_draft(title, starts_at, duration=duration, recurrence=recurrence)
+
+    return None
+
+
+def _parse_one_time_draft(text: str, *, duration: timedelta) -> CalendarCreateDraft | None:
+    relative_match = _RELATIVE_RE.search(text)
+    if relative_match:
+        title = _clean_text(text[: relative_match.start()])
+        starts_at = parse_due_text(relative_match.group(0))
+        return _build_create_draft(title, starts_at, duration=duration)
+
+    trailing_match = _TRAILING_SCHEDULE_RE.match(text)
+    if trailing_match:
+        title = _clean_text(trailing_match.group("title"))
+        when_text = _clean_text(trailing_match.group("when")) or ""
+        if extract_time_hint(when_text) is None:
+            _raise_missing_time(title, when_text)
+        starts_at = parse_due_text(when_text)
+        return _build_create_draft(title, starts_at, duration=duration)
+
+    time_only_match = _TIME_ONLY_RE.match(text)
+    if time_only_match:
+        title = _clean_text(time_only_match.group("title"))
+        when_text = _clean_text(time_only_match.group("when")) or ""
+        _raise_missing_date(title, when_text)
+
+    return None
+
+
+def _build_create_draft(
+    title: str,
+    starts_at: datetime,
+    *,
+    duration: timedelta,
+    recurrence: str = "once",
+) -> CalendarCreateDraft:
+    title_text = _clean_text(title)
+    if not title_text:
+        raise ValueError("I need an event title before I can create that calendar event.")
+    start_dt = starts_at.astimezone() if starts_at.tzinfo is not None else starts_at.replace(tzinfo=datetime.now().astimezone().tzinfo)
+    return CalendarCreateDraft(
+        title=title_text,
+        starts_at=start_dt,
+        ends_at=start_dt + duration,
+        recurrence=recurrence,
     )
 
 
-def _event_to_details(event: dict[str, Any]) -> CalendarEventDetails:
-    return CalendarEventDetails(
-        event_id=event.get("id") or "",
-        calendar_id=event.get("organizer", {}).get("email") or cfg.settings.google_calendar_id,
-        starts_at=_format_google_event_start(event.get("start", {})),
-        ends_at=_format_google_event_start(event.get("end", {})),
-        title=event.get("summary") or "(untitled event)",
-        location=event.get("location") or "",
-        description=event.get("description") or "",
+def _extract_duration(text: str) -> tuple[str, timedelta]:
+    match = _DURATION_RE.match(text)
+    if not match:
+        return text, DEFAULT_EVENT_DURATION
+
+    count = max(1, int(match.group("count")))
+    unit = match.group("unit").lower()
+    duration = timedelta(minutes=count) if unit.startswith("minute") else timedelta(hours=count)
+    return _clean_text(match.group("body")), duration
+
+
+def _display_description(description: str, recurrence: str) -> str:
+    details = str(description or "").strip()
+    recurrence_note = ""
+    if str(recurrence or "once").strip().lower() != "once":
+        recurrence_note = f"Repeats: {recurrence_label(recurrence)}."
+    if details and recurrence_note:
+        return f"{details}\n{recurrence_note}"
+    return details or recurrence_note
+
+
+def _calendar_window_bounds(window_days: int) -> tuple[datetime, datetime]:
+    days = max(1, int(window_days))
+    local_now = datetime.now().astimezone()
+    lower = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    upper = lower + timedelta(days=days)
+    return lower, upper
+
+
+def _format_display_time(value: str) -> str:
+    return parse_event_datetime(value).astimezone().strftime("%Y-%m-%d %I:%M %p")
+
+
+def _clean_text(value: str) -> str:
+    return str(value or "").strip().rstrip("?.!,")
+
+
+def _raise_missing_time(title: str, when_text: str) -> None:
+    title_text = _clean_text(title)
+    date_hint = extract_date_hint(when_text) or _clean_text(when_text)
+    raise CalendarCreateNeedsMoreDetail(
+        f"I can put `{title_text}` on your calendar for `{date_hint}`. What time should I use?",
+        title=title_text,
+        missing="time",
+        date_hint=date_hint,
     )
 
+
+def _raise_missing_date(title: str, when_text: str) -> None:
+    title_text = _clean_text(title)
+    time_hint = _normalize_time_hint_for_prompt(when_text)
+    raise CalendarCreateNeedsMoreDetail(
+        f"I can schedule `{title_text}` {time_hint}. What day should I put it on?",
+        title=title_text,
+        missing="date",
+        time_hint=time_hint,
+    )
+
+
+def _normalize_time_hint_for_prompt(value: str) -> str:
+    hint = _clean_text(value).lower()
+    if hint.startswith("around "):
+        hint = re.sub(r"^around\s+", "at ", hint)
+    elif not hint.startswith(("at ", "this ", "tonight")):
+        hint = f"at {hint}"
+    return hint

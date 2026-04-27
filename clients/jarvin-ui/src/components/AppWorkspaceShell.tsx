@@ -42,6 +42,7 @@ type AppWorkspaceShellProps = {
   isClientOnline: boolean;
   isListening: boolean;
   isMobileSidebarOpen: boolean;
+  isNativeMobileClient: boolean;
   isRemoteRecording: boolean;
   isRemoteTranscribing: boolean;
   isReplyAudioPlaying: boolean;
@@ -161,6 +162,7 @@ export function AppWorkspaceShell({
   isClientOnline,
   isListening,
   isMobileSidebarOpen,
+  isNativeMobileClient,
   isRemoteRecording,
   isRemoteTranscribing,
   isReplyAudioPlaying,
@@ -253,7 +255,7 @@ export function AppWorkspaceShell({
   onUseSuggestedVoiceReview,
 }: AppWorkspaceShellProps) {
   return (
-    <main className={`app-shell ${isMobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
+    <main className={`app-shell ${isMobileSidebarOpen ? "mobile-sidebar-open" : ""} ${isNativeMobileClient ? "mobile-client" : ""}`}>
       {isMobileSidebarOpen ? (
         <button
           type="button"

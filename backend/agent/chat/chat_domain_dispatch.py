@@ -37,6 +37,7 @@ def dispatch_active_follow_up_impl(
     agent_access_mode,
     maybe_weather_tool_response,
     maybe_handle_brief_request,
+    maybe_organizer_tool_response,
     maybe_handle_reminder_request,
     maybe_calendar_tool_response,
     maybe_workspace_tool_response,
@@ -50,6 +51,13 @@ def dispatch_active_follow_up_impl(
         if reply is None:
             return None
         return ToolChatResponse(handled=True, reply=reply, active_domain="brief")
+    if active_domain == "organizer":
+        return maybe_organizer_tool_response(
+            text,
+            conversation_id=conversation_id,
+            client_session_id=client_session_id,
+            agent_access_mode=agent_access_mode,
+        )
     if active_domain == "reminder":
         reply = maybe_handle_reminder_request(text, conversation_id=conversation_id)
         if reply is None:
@@ -203,20 +211,24 @@ def maybe_research_tool_response_impl(
         )
 
 
-def execute_calendar_plan_impl(plan, *, raw_message: str, conversation_id, begin_google_calendar_auth, calendar_lookup_reply, extract_calendar_create_text, calendar_create_reply, calendar_details_reply, calendar_delete_request_reply, calendar_update_request_reply, calendar_move_request_reply):
+def execute_calendar_plan_impl(plan, *, raw_message: str, conversation_id, begin_calendar_setup, calendar_lookup_reply, extract_calendar_create_text, calendar_create_reply, calendar_details_reply, calendar_delete_request_reply, calendar_update_request_reply, calendar_move_request_reply):
     action = (plan.action or "lookup").strip().lower()
 
     if action == "auth":
-        return begin_google_calendar_auth()
+        return begin_calendar_setup()
 
     if action == "lookup":
         return calendar_lookup_reply(raw_message, window_days_override=plan.window_days)
 
     if action == "create":
         details = plan.query or extract_calendar_create_text(raw_message)
+        if plan.new_title and plan.when_text and (not details or str(details).strip().lower() == str(plan.when_text).strip().lower()):
+            details = f"{plan.new_title} {plan.when_text}".strip()
+        elif not details and plan.new_title:
+            details = " ".join(part for part in (plan.new_title, plan.when_text) if part).strip()
         if not details:
             raise ValueError("Tell me what event to create and when it should happen.")
-        return calendar_create_reply(details)
+        return calendar_create_reply(details, conversation_id=conversation_id)
 
     if action == "details":
         query = plan.query or raw_message

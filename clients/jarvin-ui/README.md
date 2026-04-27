@@ -14,9 +14,13 @@ The Python host remains the source of truth for models, GPU inference, persisten
 
 - typed chat with multi-conversation history
 - remote microphone capture
+- voice transcript confidence review with confirm/retry UI
 - spoken reply playback on the phone
 - model/backend selection
 - listener and device controls
+- mobile notification controls for synced reminders
+- approval cards and host task cards
+- server-sent event updates for live task/listener state
 - profile and diagnostics surfaces
 - weather cards and other richer tool responses
 
@@ -142,4 +146,5 @@ clients/jarvin-ui/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-ar
 
 - Host listener controls refer to microphones attached to the Jarvin PC
 - Remote microphone capture is a separate client-side path
+- Both host and remote voice pass through a transcript confidence review before Jarvin acts on suspicious text
 - The Tauri Android shell is the preferred phone voice path because it avoids browser secure-context limitations on plain HTTP

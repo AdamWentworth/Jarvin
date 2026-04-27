@@ -398,8 +398,33 @@
 }
 
 @media (max-width: 900px) {
+  .message-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .message-row.user .message-card {
+    width: min(100%, 92%);
+    max-width: min(100%, 92%);
+  }
+
   .approval-request-header,
   .approval-request-footer {
     flex-direction: column;
   }
+}
+
+.app-shell.mobile-client .message-card {
+  width: 100%;
+  max-width: 100%;
+}
+
+.app-shell.mobile-client .message-row.user .message-card {
+  width: min(100%, 92%);
+  max-width: min(100%, 92%);
+}
+
+.app-shell.mobile-client .approval-request-header,
+.app-shell.mobile-client .approval-request-footer {
+  flex-direction: column;
 }

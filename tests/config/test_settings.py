@@ -102,3 +102,14 @@ def test_agent_default_access_mode_validator(value, expected, monkeypatch):
     monkeypatch.setenv("JARVIN_AGENT_DEFAULT_ACCESS_MODE", value)
     s = Settings()
     assert s.agent_default_access_mode == expected
+
+
+def test_default_llm_prefers_qwen_3b(monkeypatch):
+    monkeypatch.delenv("JARVIN_LLM_FORCE_LOGICAL_NAME", raising=False)
+    monkeypatch.delenv("JARVIN_LLM_MODEL_PREFERENCE", raising=False)
+
+    s = Settings()
+
+    assert s.llm_force_logical_name == "qwen2.5-3b-instruct"
+    assert s.llm_model_preference[0] == "qwen2.5-3b-instruct"
+    assert "phi-3-mini-4k-instruct" in s.llm_model_preference

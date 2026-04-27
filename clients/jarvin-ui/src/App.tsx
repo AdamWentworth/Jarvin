@@ -22,6 +22,7 @@ import {
   type ReasoningEffort,
 } from "./lib/ui";
 import {
+  detectMobileClient,
   getStoredAgentAccessMode,
   getStoredChatDraft,
   setStoredAgentAccessMode,
@@ -34,8 +35,8 @@ import { useJarvinHost } from "./hooks/useJarvinHost";
 import { useConversationWorkspace } from "./hooks/useConversationWorkspace";
 import { AppWorkspaceShell } from "./components/AppWorkspaceShell";
 import { describeError } from "./lib/workspace";
-
 function App() {
+  const isNativeMobileClient = detectMobileClient();
   const [profile, setProfile] = useState<UserProfilePayload>(DEFAULT_PROFILE);
   const [chatInput, setChatInput] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("medium");
@@ -77,7 +78,6 @@ function App() {
     sending,
     shouldPollConversation: hasRunningHostTask,
   });
-
   async function handleSendMessage(rawText?: string, source: SendSource = "typed") {
     const text = (rawText ?? chatInput).trim();
     if (!text || sending) {
@@ -236,7 +236,6 @@ function App() {
     isClientOnline: host.isClientOnline,
     describeError,
   });
-
   useEffect(() => {
     setChatInput(getStoredChatDraft(workspace.activeConversationId));
   }, [workspace.activeConversationId]);
@@ -403,6 +402,7 @@ function App() {
       isClientOnline={host.isClientOnline}
       isListening={Boolean(host.status?.listening)}
       isMobileSidebarOpen={isMobileSidebarOpen}
+      isNativeMobileClient={isNativeMobileClient}
       isRemoteRecording={isRemoteRecording}
       isRemoteTranscribing={isRemoteTranscribing}
       isReplyAudioPlaying={isReplyAudioPlaying}

@@ -15,6 +15,7 @@ _ACTIVE_DOMAIN_CUES: dict[str, tuple[str, ...]] = {
     "brief": ("brief", "rundown", "my day", "day look like", "daily brief", "morning brief"),
     "reminder": ("remind", "reminder", "task", "todo", "to-do", "routine"),
     "calendar": ("calendar", "agenda", "schedule", "meeting", "event", "appointment"),
+    "organizer": ("overview", "clean up", "delete all", "start over", "calendar", "event", "appointment", "reminder", "task"),
     "workspace": ("repo", "repository", "codebase", "workspace", "directory", "folder", "git", "pytest", "file"),
     "research": ("research", "search the web", "look up", "look into", "dig into", "sources", "google "),
 }
@@ -77,6 +78,14 @@ def looks_like_ambiguous_follow_up(message: str) -> bool:
 
 def has_conflicting_domain_cues(message: str, *, active_domain: str) -> bool:
     lower = str(message or "").strip().lower()
+    if active_domain == "organizer":
+        organizer_safe_domains = {"reminder", "calendar", "organizer"}
+        for domain, cues in _ACTIVE_DOMAIN_CUES.items():
+            if domain in organizer_safe_domains:
+                continue
+            if any(cue in lower for cue in cues):
+                return True
+        return False
     for domain, cues in _ACTIVE_DOMAIN_CUES.items():
         if domain == active_domain:
             continue

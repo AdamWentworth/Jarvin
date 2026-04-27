@@ -22,19 +22,25 @@ The goal is not to train a brand-new foundation model. The goal is to build a st
 - mobile/VPN voice path:
   - phone microphone upload
   - host-side transcription
+  - transcript confidence review before acting on shaky ASR
   - spoken reply playback on the phone
+- local host listener transcript review and clarification
 - local `llama.cpp` runtime with optional Ollama backend support
 - SQLite-backed profile and conversation persistence
 - reminder and routine storage with CRUD APIs
 - morning briefs that combine weather, calendar, and reminders
 - weather lookup with visual weather cards in the client
-- Google Calendar integration with event CRUD
+- built-in local calendar with event CRUD and simple recurring events
 - web research via DuckDuckGo-backed search, page fetch, and summarization
 - safe host-side tools for:
   - repo search
   - file reads
   - directory listing
   - limited command execution
+- approval cards, action audit logs, and scoped trust for risky host actions
+- task-scoped host plans with task cards and live progress updates
+- mobile system notifications for synced reminders
+- server-sent events for realtime listener/task/conversation updates
 - natural-language planners for:
   - weather
   - calendar
@@ -47,12 +53,12 @@ The goal is not to train a brand-new foundation model. The goal is to build a st
 ## What Is Still Missing Or Thin
 
 - real authentication and session guardrails for remote clients
-- explicit permission / approval flows for risky host actions
-- proactive notifications on the phone
+- broader and more polished remote-client auth/session management
+- proactive scheduled notification delivery beyond local synced reminders
 - stronger long-term memory and preference storage
-- background jobs and watch-style agents
+- richer background jobs and watch-style agents
 - richer integrations such as email, messaging, and home/device control
-- better action tracing, auditability, and operator logs
+- deeper action tracing, diff review, and rollback support
 - more polished streaming and interruption behavior
 - stronger TTS quality and voice options
 
@@ -75,12 +81,14 @@ Status: in progress, but already useful
 - safe host-side tool layer exists
 - natural-language planners now cover core domains
 - follow-up routing has started to reduce brittle phrasing
+- approval cards and host action audit logs exist
+- first task-scoped execution flow exists
 
 Still needed:
 
-- confirmation model for risky actions beyond calendar edits
-- better traces and permission UX
-- more robust multi-step task execution
+- richer task scopes, rollback/diff previews, and longer-running job controls
+- broader host capabilities behind the approval model
+- device identity and revocation for trusted clients
 
 ### Phase 3: Remote Clients And Mobile Voice
 
@@ -91,10 +99,12 @@ Status: in progress, working for real use
 - host-served `/app/` shell
 - Tauri Android shell
 - remote mic upload and phone speaker playback
+- voice transcript confidence checks for both remote and host microphones
+- mobile system notifications for synced reminders
 
 Still needed:
 
-- richer mobile notifications
+- richer notification scheduling and background sync
 - smoother reconnect and session UX
 - more polished interruption and streaming audio behavior
 
@@ -102,17 +112,18 @@ Still needed:
 
 Status: next major focus
 
-- remote auth
-- better diagnostics and action logs
-- safer tool approval model
+- lightweight remote auth
+- device/session trust management
 - clearer host health and background task monitoring
+- rollback and stronger audit review for agent tasks
 
 ### Phase 5: Proactive Assistant Behavior
 
 Status: next major product leap
 
 - scheduled morning brief delivery
-- due reminder notifications
+- scheduled morning brief delivery
+- richer due reminder notifications
 - host health alerts
 - assistant-initiated nudges instead of request-only behavior
 
@@ -150,7 +161,7 @@ Status: later
 If we are choosing what to build next, the highest-value slices are:
 
 1. phone notifications for reminders and briefs
-2. explicit permission / confirmation flow for risky host actions
+2. scheduled morning brief delivery and notification background sync
 3. lightweight auth for remote clients
 4. richer long-term memory and saved preferences
 5. background jobs and watch-style tasks

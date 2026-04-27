@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import re
 
 from backend.ai_engine import build_jarvin_config, generate_reply
 from backend.agent.calendar.calendar_request_nlu import (
@@ -15,8 +16,12 @@ from backend.agent.calendar.calendar_request_nlu import (
     extract_move_parts,
     extract_notes_parts,
     extract_rename_parts,
+    extract_date_hint,
+    extract_time_hint,
+    has_temporal_hint,
     infer_window_days,
     is_explicit_calendar_lookup,
+    looks_like_calendar_create_request,
     looks_calendar_related,
     looks_like_calendar_delete,
     looks_like_calendar_details,
@@ -24,6 +29,7 @@ from backend.agent.calendar.calendar_request_nlu import (
     looks_like_calendar_move,
     looks_like_calendar_notes_update,
     looks_like_calendar_rename,
+    normalize_calendar_create_text,
     parse_json_object,
     strip_calendar_create_prefix,
 )
@@ -45,6 +51,9 @@ class CalendarPlan:
 class CalendarConversationContext:
     last_action: str = "lookup"
     last_query: str | None = None
+    pending_create_title: str | None = None
+    pending_create_date_hint: str | None = None
+    pending_create_time_hint: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=15))
 
@@ -58,6 +67,11 @@ def maybe_plan_calendar_request(text: str, *, conversation_id: int | None = None
         return None
 
     context = get_calendar_context(conversation_id)
+    pending_follow_up = _pending_create_follow_up_plan(message, context)
+    if pending_follow_up is not None:
+        _remember_calendar_context(conversation_id, pending_follow_up)
+        return pending_follow_up
+
     heuristic = _heuristic_plan(message, context)
     if heuristic is not None:
         _remember_calendar_context(conversation_id, heuristic)
@@ -86,9 +100,33 @@ def get_calendar_context(conversation_id: int | None) -> CalendarConversationCon
 
 
 def _remember_calendar_context(conversation_id: int | None, plan: CalendarPlan) -> None:
+    _calendar_context[_context_key(conversation_id)] = CalendarConversationContext(last_action=plan.action or "lookup", last_query=plan.query)
+
+
+def remember_pending_calendar_create(
+    conversation_id: int | None,
+    *,
+    title: str,
+    date_hint: str | None,
+    time_hint: str | None,
+) -> None:
+    current = get_calendar_context(conversation_id)
     _calendar_context[_context_key(conversation_id)] = CalendarConversationContext(
-        last_action=plan.action or "lookup",
-        last_query=plan.query,
+        last_action="create",
+        last_query=title or (current.last_query if current else None),
+        pending_create_title=title or None,
+        pending_create_date_hint=date_hint or None,
+        pending_create_time_hint=time_hint or None,
+    )
+
+
+def clear_pending_calendar_create(conversation_id: int | None) -> None:
+    current = get_calendar_context(conversation_id)
+    if current is None:
+        return
+    _calendar_context[_context_key(conversation_id)] = CalendarConversationContext(
+        last_action=current.last_action,
+        last_query=current.last_query,
     )
 
 
@@ -116,9 +154,9 @@ def _heuristic_plan(message: str, context: CalendarConversationContext | None) -
             window_days=infer_window_days(lower),
         )
 
-    if "calendar" in lower or "event" in lower:
-        details = strip_calendar_create_prefix(message)
-        if details and any(lower.startswith(prefix) for prefix in ("add ", "create ", "schedule ", "put ", "please add ", "please create ", "please schedule ", "please put ")):
+    if looks_like_calendar_create_request(message, context=context):
+        details = normalize_calendar_create_text(message) or strip_calendar_create_prefix(message)
+        if details:
             return CalendarPlan(is_calendar_request=True, action="create", query=details)
 
     if looks_like_calendar_details(lower, context=context):
@@ -158,15 +196,16 @@ def _heuristic_plan(message: str, context: CalendarConversationContext | None) -
 
 def _llm_plan_calendar_request(message: str, *, context: CalendarConversationContext | None) -> CalendarPlan:
     system = (
-        "You extract Google Calendar tool arguments for Jarvin. "
+        "You extract local calendar tool arguments for Jarvin. "
         "Return JSON only with keys: "
         "is_calendar_request (boolean), action (string), query (string|null), "
         "when_text (string|null), new_title (string|null), new_location (string|null), "
         "new_description (string|null), window_days (integer|null). "
         "Valid actions are lookup, auth, create, details, delete, rename, update_location, update_description, move, unknown. "
-        "Treat 'Google Calendar' as the user's calendar, not as web search. "
+        "Treat phrases like 'Google Calendar' or 'my calendar' as the user's calendar, not as web search. "
         "For requests like 'look at my calendar today' or 'what do I have this week', action should be lookup. "
         "For follow-up phrases like 'how about this week' after prior calendar context, still treat it as calendar lookup. "
+        "For create requests, put the full event details into query, such as 'lunch with Sam tomorrow at noon', not just the date. "
         "For edit requests, extract the current event reference into query and the requested change into the appropriate field. "
         "For phrases like 'shift lunch back an hour', action should be move and when_text can be 'back an hour'. "
         "For phrases like 'make the cafe the location for that meeting', action should be update_location. "
@@ -215,4 +254,39 @@ def _resolve_contextual_references(plan: CalendarPlan, *, context: CalendarConve
         new_description=plan.new_description,
         window_days=plan.window_days,
     )
+
+
+def _pending_create_follow_up_plan(message: str, context: CalendarConversationContext | None) -> CalendarPlan | None:
+    if context is None or not context.pending_create_title or not has_temporal_hint(message):
+        return None
+
+    date_hint = context.pending_create_date_hint or extract_date_hint(message)
+    time_hint = context.pending_create_time_hint or _normalize_time_hint_for_merge(extract_time_hint(message))
+
+    if not date_hint and not time_hint:
+        return None
+
+    details = " ".join(part for part in (context.pending_create_title, date_hint, time_hint) if part)
+    if not details.strip():
+        return None
+    return CalendarPlan(is_calendar_request=True, action="create", query=details)
+
+
+def _normalize_time_hint_for_merge(value: str | None) -> str | None:
+    hint = str(value or "").strip().lower()
+    if not hint:
+        return None
+    if hint.startswith(("at ", "around ", "this ", "tonight")):
+        return re.sub(r"^around\s+", "at ", hint)
+    if hint in {"morning", "afternoon", "evening", "noon", "midnight"}:
+        return f"at {hint}"
+    if re.match(r"^\d", hint):
+        if hint.endswith(" noon"):
+            return f"at {hint}"
+        return f"at {hint}"
+    return hint
+
+
+def _reset_calendar_context_for_tests() -> None:
+    _calendar_context.clear()
 

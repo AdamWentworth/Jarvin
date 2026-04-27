@@ -62,7 +62,9 @@ Why:
 - it was one of the fastest models in a quick local smoke benchmark
 - it is a better fit than forcing a 7B model into every turn
 
-Recommended env override:
+This is now the repo default.
+
+Optional env override if you want to force it explicitly:
 
 ```powershell
 $env:JARVIN_LLM_FORCE_LOGICAL_NAME = "qwen2.5-3b-instruct"

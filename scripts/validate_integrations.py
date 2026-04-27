@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -12,12 +13,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config as cfg  # noqa: E402
-from backend.agent.integration_facade import (  # noqa: E402
-    browse_search_results,
-    google_calendar_credentials_configured,
-    google_calendar_token_available,
-    google_search_is_configured,
-)
+from backend.agent.integration_facade import browse_search_results, get_calendar_agenda, google_search_is_configured  # noqa: E402
+from memory.calendar_events import list_calendar_events, list_calendar_occurrences  # noqa: E402
 
 
 def _mask_secret(value: str, *, visible: int = 4) -> str:
@@ -92,33 +89,51 @@ def _validate_search(query: str) -> int:
 
 def _validate_calendar() -> int:
     _print_header("calendar-config")
-    print(f"credentials_file={Path(cfg.settings.google_calendar_credentials_file).resolve()}")
-    print(f"token_file={Path(cfg.settings.google_calendar_token_file).resolve()}")
-    print(f"calendar_id={cfg.settings.google_calendar_id}")
+    print(f"db_path={Path(cfg.settings.db_path).resolve()}")
+    print("storage=sqlite")
+    print("table=calendar_events")
+    print(f"agenda_limit={cfg.settings.calendar_max_events}")
 
-    creds_ok = google_calendar_credentials_configured()
-    token_ok = google_calendar_token_available()
-
-    print(f"credentials_present={str(creds_ok).lower()}")
-    print(f"token_present={str(token_ok).lower()}")
-
-    if not creds_ok:
+    try:
+        stored = list_calendar_events(limit=1000)
+    except Exception as exc:
         print("status=fail")
-        print("reason=Missing Google Calendar OAuth client JSON.")
+        print(f"reason=Could not read the local calendar store. {exc}")
         return 1
 
-    if not token_ok:
-        print("status=warn")
-        print("reason=Calendar credentials exist, but the host has not been authorized yet.")
-        return 0
+    now = datetime.now().astimezone()
+    today_lower = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_upper = today_lower + timedelta(days=1)
+    week_upper = today_lower + timedelta(days=7)
+
+    today = list_calendar_occurrences(lower=today_lower, upper=today_upper, limit=100)
+    week = list_calendar_occurrences(lower=today_lower, upper=week_upper, limit=100)
+    agenda = get_calendar_agenda(window_days=7)
 
     print("status=ok")
+    print(f"events_total={len(stored)}")
+    print(f"events_today={len(today)}")
+    print(f"events_next_7_days={len(week)}")
+    print(f"agenda_events={len(agenda.events)}")
+    if not stored:
+        print("note=No local calendar events have been saved yet.")
+
+    if week:
+        _print_header("upcoming-calendar")
+        for index, item in enumerate(week[:5], start=1):
+            print(f"{index}. {item['title']}")
+            print(f"   starts_at={item['starts_at']}")
+            if item.get("location"):
+                print(f"   location={item['location']}")
+            if item.get("recurrence") and item["recurrence"] != "once":
+                print(f"   recurrence={item['recurrence']}")
+
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate Jarvin external integrations like Google search and Google Calendar."
+        description="Validate Jarvin integrations like web search and the built-in local calendar."
     )
     parser.add_argument(
         "--query",
@@ -133,7 +148,7 @@ def main() -> int:
     parser.add_argument(
         "--calendar-only",
         action="store_true",
-        help="Only validate Google Calendar configuration.",
+        help="Only validate the built-in local calendar.",
     )
     args = parser.parse_args()
 
@@ -151,4 +166,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

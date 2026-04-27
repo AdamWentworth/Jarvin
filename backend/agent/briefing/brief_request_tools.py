@@ -11,8 +11,6 @@ from backend.agent.briefing.brief_request_planner import (
 from backend.agent.integration_facade import (
     get_calendar_agenda,
     get_weather,
-    google_calendar_credentials_configured,
-    google_calendar_token_available,
 )
 from memory.conversation import get_user_profile
 from memory.reminders import list_reminders
@@ -105,11 +103,6 @@ def _weather_section(location: str, *, day_offset: int) -> str:
 
 
 def _calendar_section(*, target_date, day_offset: int) -> list[str]:
-    if not google_calendar_credentials_configured():
-        return ["- Calendar: not connected yet on this host."]
-    if not google_calendar_token_available():
-        return ["- Calendar: credentials are ready, but the host still needs authorization."]
-
     try:
         agenda = get_calendar_agenda(window_days=max(1, day_offset + 1))
     except Exception as exc:

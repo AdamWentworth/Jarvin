@@ -121,3 +121,17 @@ def test_calendar_planner_can_use_llm_for_fuzzy_move_with_context(monkeypatch):
     assert plan.query == "Lunch with Sam"
     assert plan.when_text == "back an hour"
 
+
+def test_calendar_planner_does_not_grab_generic_complaint_from_stale_context():
+    calendar_tools._calendar_context["208"] = calendar_tools.CalendarConversationContext(
+        last_action="create",
+        last_query="Costco",
+    )
+
+    plan = calendar_tools.maybe_plan_calendar_request(
+        "Okay, good. You did that, but I asked you to do a few things there. Are you not capable of doing multiple things per prompt?",
+        conversation_id=208,
+    )
+
+    assert plan is None
+

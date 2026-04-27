@@ -106,7 +106,6 @@ def manifest() -> dict[str, object]:
             "/tool reminder move <task> | <new date/time>",
             "/tool reminder delete <task>",
             "/tool calendar [days]",
-            "/tool calendar auth",
             "/tool calendar add <details>",
             "/tool calendar details <event name>",
             "/tool calendar delete <event name>",

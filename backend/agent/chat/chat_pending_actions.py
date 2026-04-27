@@ -29,6 +29,10 @@ def maybe_handle_pending_confirmation_impl(
     reschedule_calendar_event,
     update_calendar_event_fields,
     calendar_field_update_success_reply,
+    get_pending_organizer_cleanup_action,
+    clear_pending_organizer_cleanup_action,
+    delete_reminder,
+    delete_local_calendar_event,
 ):
     normalized = normalize_confirmation_text(text)
     host_pending = get_pending_host_approval(conversation_id)
@@ -225,6 +229,45 @@ def maybe_handle_pending_confirmation_impl(
                 client_session_id=client_session_id,
             )
 
+    organizer_pending = get_pending_organizer_cleanup_action(conversation_id)
+    if organizer_pending is not None:
+        if normalized in cancel_patterns:
+            clear_pending_organizer_cleanup_action(conversation_id)
+            return ToolChatResponse(
+                handled=True,
+                reply="Okay, I canceled that cleanup plan and left your reminders and calendar events alone.",
+            )
+
+        if normalized not in confirm_patterns:
+            return ToolChatResponse(handled=False)
+
+        clear_pending_organizer_cleanup_action(conversation_id)
+        deleted_reminders = []
+        deleted_events = []
+        for reminder_id in organizer_pending.reminder_ids:
+            try:
+                deleted_reminders.append(delete_reminder(int(reminder_id)))
+            except ValueError:
+                continue
+        for event_id in organizer_pending.calendar_event_ids:
+            try:
+                deleted_events.append(delete_local_calendar_event(int(event_id)))
+            except ValueError:
+                continue
+
+        parts: list[str] = []
+        if organizer_pending.keep_labels:
+            parts.append(
+                "Kept:\n" + "\n".join(f"- {item}" for item in organizer_pending.keep_labels)
+            )
+        if organizer_pending.delete_labels:
+            parts.append(
+                "Deleted:\n" + "\n".join(f"- {item}" for item in organizer_pending.delete_labels)
+            )
+        if not parts:
+            parts.append("There was nothing left to clean up.")
+        return ToolChatResponse(handled=True, reply="\n\n".join(parts))
+
     pending = get_pending_calendar_action(conversation_id)
     if pending is None:
         return ToolChatResponse(handled=False)
@@ -238,7 +281,7 @@ def maybe_handle_pending_confirmation_impl(
 
     clear_pending_calendar_action(conversation_id)
     if pending.action == "calendar_delete":
-        deleted = delete_calendar_event(pending.event_id)
+        deleted = delete_calendar_event(pending.event_id, calendar_id=pending.calendar_id)
         return ToolChatResponse(
             handled=True,
             reply=f"Deleted `{deleted.title}` from your calendar. It was scheduled for `{deleted.starts_at}`.",
@@ -250,6 +293,7 @@ def maybe_handle_pending_confirmation_impl(
             raise ValueError("That pending calendar update is missing the new time details.")
         updated = reschedule_calendar_event(
             pending.event_id,
+            calendar_id=pending.calendar_id,
             new_start_iso=pending.new_start_iso,
             new_end_iso=pending.new_end_iso,
         )
@@ -262,6 +306,7 @@ def maybe_handle_pending_confirmation_impl(
     if pending.action == "calendar_update_fields":
         updated = update_calendar_event_fields(
             pending.event_id,
+            calendar_id=pending.calendar_id,
             title=pending.new_title,
             location=pending.new_location,
             description=pending.new_description,
