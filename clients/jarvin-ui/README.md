@@ -51,6 +51,21 @@ Then open:
 http://your-host-or-wireguard-ip:8000/app/
 ```
 
+## Capture Demo Media
+
+The demo capture uses mocked host responses, so it does not start a local model, use the microphone, mutate reminders, or touch real workspace files.
+
+```powershell
+cd clients\jarvin-ui
+npm run capture:demo
+```
+
+Output is written to:
+
+```text
+clients/jarvin-ui/artifacts/demo-media/jarvin
+```
+
 ## Build Checks
 
 ```powershell

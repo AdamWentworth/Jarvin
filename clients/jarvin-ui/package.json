@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:host": "tsc && vite build --base=/app/ --outDir dist-host",
+    "capture:demo": "node scripts/capture-demo-media.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:android:init": "tauri android init --ci",
@@ -23,6 +24,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
