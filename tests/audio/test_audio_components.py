@@ -204,10 +204,10 @@ def test_list_input_devices_and_default():
     assert isinstance(idx, int)
 
 
-def test_set_and_get_selected_input_device():
+def test_set_and_get_selected_input_device(monkeypatch):
     # Patch cfg.settings inside the mic module if needed
     if hasattr(mic, 'cfg'):
-        mic.cfg.settings = mock_config.settings  # Use our mock
+        monkeypatch.setattr(mic.cfg, "settings", mock_config.settings, raising=True)
     
     idx, name = mic.set_selected_input_device(0)
     got_idx, got_name = mic.get_selected_input_device()
