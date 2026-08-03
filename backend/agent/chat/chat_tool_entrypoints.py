@@ -87,13 +87,17 @@ def maybe_handle_natural_language_tool_request_impl(
     ToolChatResponse,
     calendar_auth_re,
     begin_calendar_setup,
+    maybe_personal_organization_planned_response,
     maybe_active_follow_up_response,
+    maybe_planned_tool_response,
     maybe_organizer_tool_response,
     maybe_compound_tool_response,
     maybe_weather_tool_response,
     maybe_handle_brief_request,
     maybe_handle_reminder_request,
     maybe_calendar_tool_response,
+    get_calendar_context,
+    get_reminder_context,
     maybe_host_task_response,
     maybe_workspace_tool_response,
     maybe_research_tool_response,
@@ -142,6 +146,15 @@ def maybe_handle_natural_language_tool_request_impl(
             active_domain="calendar",
         )
 
+    personal_organization_reply = maybe_personal_organization_planned_response(
+        message,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+        agent_access_mode=agent_access_mode,
+    )
+    if personal_organization_reply is not None:
+        return personal_organization_reply
+
     active_follow_up = maybe_active_follow_up_response(
         message,
         conversation_id=conversation_id,
@@ -160,6 +173,15 @@ def maybe_handle_natural_language_tool_request_impl(
     if organizer_reply is not None:
         return organizer_reply
 
+    planned_reply = maybe_planned_tool_response(
+        message,
+        conversation_id=conversation_id,
+        client_session_id=client_session_id,
+        agent_access_mode=agent_access_mode,
+    )
+    if planned_reply is not None:
+        return planned_reply
+
     compound_reply = maybe_compound_tool_response(
         message,
         conversation_id=conversation_id,
@@ -176,6 +198,16 @@ def maybe_handle_natural_language_tool_request_impl(
     brief_reply = maybe_handle_brief_request(message, conversation_id=conversation_id)
     if brief_reply is not None:
         return ToolChatResponse(handled=True, reply=brief_reply, active_domain="brief")
+
+    clarification_reply = _maybe_meta_domain_clarification_response(
+        message,
+        conversation_id=conversation_id,
+        ToolChatResponse=ToolChatResponse,
+        get_calendar_context=get_calendar_context,
+        get_reminder_context=get_reminder_context,
+    )
+    if clarification_reply is not None:
+        return clarification_reply
 
     reminder_reply = maybe_handle_reminder_request(message, conversation_id=conversation_id)
     if reminder_reply is not None:
@@ -355,3 +387,56 @@ def _safe_tool_call(ToolChatResponse, fn, fallback: str, *, active_domain: str |
         if detail:
             return ToolChatResponse(handled=True, reply=f"{fallback} {detail}", active_domain=active_domain)
         return ToolChatResponse(handled=True, reply=fallback, active_domain=active_domain)
+
+
+def _looks_like_meta_domain_clarification(message: str) -> bool:
+    lower = str(message or "").strip().lower()
+    if not lower:
+        return False
+    if "to be clear" in lower and ("reminder" in lower or "event" in lower or "calendar" in lower):
+        return True
+    if "is that a reminder" in lower or "is that an event" in lower:
+        return True
+    if "was that a reminder" in lower or "was that an event" in lower:
+        return True
+    if "reminder or" in lower and ("event" in lower or "calendar" in lower):
+        return True
+    return False
+
+
+def _maybe_meta_domain_clarification_response(
+    message: str,
+    *,
+    conversation_id,
+    ToolChatResponse,
+    get_calendar_context,
+    get_reminder_context,
+):
+    if not _looks_like_meta_domain_clarification(message):
+        return None
+    calendar_context = get_calendar_context(conversation_id)
+    reminder_context = get_reminder_context(conversation_id)
+    recent_calendar = bool(calendar_context and calendar_context.last_action == "create" and calendar_context.last_query)
+    recent_reminder = bool(reminder_context and reminder_context.last_action == "create" and reminder_context.last_title)
+    if recent_calendar and recent_reminder:
+        return ToolChatResponse(
+            handled=True,
+            reply=(
+                f"That created both: a calendar event for `{calendar_context.last_query}` "
+                f"and a reminder for `{reminder_context.last_title}`."
+            ),
+            active_domain="organizer",
+        )
+    if recent_calendar:
+        return ToolChatResponse(
+            handled=True,
+            reply=f"That was a calendar event for `{calendar_context.last_query}`.",
+            active_domain="calendar",
+        )
+    if recent_reminder:
+        return ToolChatResponse(
+            handled=True,
+            reply=f"That was a reminder for `{reminder_context.last_title}`.",
+            active_domain="reminder",
+        )
+    return ToolChatResponse(handled=False)

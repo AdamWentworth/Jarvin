@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta
 import re
 
 DEFAULT_REMINDER_TIME = time(hour=9, minute=0)
+_MERIDIEM_RE = r"(?:a\.?m\.?|p\.?m\.?)"
 WEEKDAYS = {
     "monday": 0,
     "tuesday": 1,
@@ -116,7 +117,11 @@ def _extract_time(text: str) -> time | None:
     if not text:
         return None
 
-    colon_match = re.search(r"\b(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<meridiem>am|pm)\b", text, re.IGNORECASE)
+    colon_match = re.search(
+        rf"\b(?P<hour>\d{{1,2}})(?::(?P<minute>\d{{2}}))?\s*(?P<meridiem>{_MERIDIEM_RE})\b",
+        text,
+        re.IGNORECASE,
+    )
     if colon_match:
         minutes = _time_match_to_minutes(
             colon_match.group("hour"),
@@ -137,7 +142,7 @@ def _extract_time(text: str) -> time | None:
     if twenty_four:
         return time(hour=int(twenty_four.group("hour")), minute=int(twenty_four.group("minute")))
 
-    named = re.search(r"\b(?P<hour>\d{1,2})\s*(?P<meridiem>am|pm)\b", text, re.IGNORECASE)
+    named = re.search(rf"\b(?P<hour>\d{{1,2}})\s*(?P<meridiem>{_MERIDIEM_RE})\b", text, re.IGNORECASE)
     if named:
         minutes = _time_match_to_minutes(named.group("hour"), None, named.group("meridiem"))
         return time(hour=minutes // 60, minute=minutes % 60)
@@ -148,7 +153,7 @@ def _extract_time(text: str) -> time | None:
 def _time_match_to_minutes(hour_text: str, minute_text: str | None, meridiem_text: str | None) -> int:
     hour = int(hour_text)
     minute = int(minute_text or 0)
-    meridiem = (meridiem_text or "").lower()
+    meridiem = (meridiem_text or "").lower().replace(".", "")
     if meridiem == "pm" and hour != 12:
         hour += 12
     if meridiem == "am" and hour == 12:

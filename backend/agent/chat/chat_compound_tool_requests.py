@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 
 from backend.ai_engine import build_jarvin_config, generate_reply
+from backend.agent.calendar.calendar_request_nlu import extract_date_hint
 
 _SUPPORTED_DOMAINS = {"reminder", "calendar"}
 _COMPOUND_SEPARATORS = (" and ", " then ", " also ", " after that ", " plus ")
@@ -107,11 +108,31 @@ def maybe_compound_tool_response_impl(
     if plan is None or not plan.is_compound_request or len(plan.steps) < 2:
         return None
 
+    return execute_compound_tool_steps(
+        plan.steps,
+        source_text=text,
+        conversation_id=conversation_id,
+        ToolChatResponse=ToolChatResponse,
+        maybe_handle_reminder_request=maybe_handle_reminder_request,
+        maybe_calendar_tool_response=maybe_calendar_tool_response,
+    )
+
+
+def execute_compound_tool_steps(
+    steps,
+    *,
+    source_text=None,
+    conversation_id,
+    ToolChatResponse,
+    maybe_handle_reminder_request,
+    maybe_calendar_tool_response,
+):
+    normalized_steps = _normalize_compound_steps(steps, source_text=source_text)
     replies: list[str] = []
     active_domain: str | None = None
     blocking_response = None
 
-    for step in plan.steps:
+    for step in normalized_steps:
         response = _execute_compound_step(
             step,
             conversation_id=conversation_id,
@@ -166,6 +187,32 @@ def _execute_compound_step(
         return maybe_calendar_tool_response(step.prompt, conversation_id=conversation_id)
 
     return None
+
+
+def _normalize_compound_steps(steps, *, source_text) -> tuple[CompoundToolStep, ...]:
+    shared_date_hint = extract_date_hint(str(source_text or ""))
+    normalized: list[CompoundToolStep] = []
+    for step in steps:
+        if step.domain != "reminder" or not shared_date_hint or extract_date_hint(step.prompt):
+            normalized.append(step)
+            continue
+        prompt = re.sub(
+            r"\b(reminder)\s+(at\b)",
+            rf"\1 {shared_date_hint} \2",
+            step.prompt,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if prompt == step.prompt:
+            prompt = re.sub(
+                r"\b(reminder)\b",
+                rf"\1 {shared_date_hint}",
+                step.prompt,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        normalized.append(CompoundToolStep(domain=step.domain, prompt=prompt))
+    return tuple(normalized)
 
 
 def _looks_like_compound_candidate(message: str) -> bool:

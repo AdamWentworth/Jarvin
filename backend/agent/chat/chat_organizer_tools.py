@@ -14,6 +14,7 @@ from backend.agent.chat.chat_organizer_pending_actions import (
     PendingOrganizerCleanupAction,
     set_pending_organizer_cleanup_action,
 )
+from backend.agent.reminders.reminder_request_planner import remember_reminder_context
 from memory.calendar_events import list_calendar_occurrences
 from memory.reminders import list_reminders
 
@@ -116,7 +117,7 @@ def maybe_organizer_tool_response_impl(
             remember_organizer_context(conversation_id, action="overview")
             return ToolChatResponse(
                 handled=True,
-                reply=combined_overview_reply(),
+                reply=combined_overview_reply(conversation_id=conversation_id),
                 active_domain="organizer",
             )
         except Exception as exc:
@@ -131,8 +132,32 @@ def maybe_organizer_tool_response_impl(
     return None
 
 
-def combined_overview_reply() -> str:
+def execute_organizer_action(
+    action: str,
+    *,
+    text: str,
+    conversation_id: int | None,
+) -> str | None:
+    normalized_action = str(action or "").strip().lower()
+    if normalized_action == "overview":
+        remember_organizer_context(conversation_id, action="overview")
+        return combined_overview_reply(conversation_id=conversation_id)
+    if normalized_action == "cleanup":
+        remember_organizer_context(conversation_id, action="cleanup")
+        return organizer_cleanup_reply(text, conversation_id=conversation_id)
+    return None
+
+
+def combined_overview_reply(*, conversation_id: int | None = None) -> str:
     snapshot = _build_snapshot()
+    if snapshot.reminders:
+        remember_reminder_context(
+            conversation_id,
+            action="list",
+            last_title=snapshot.reminders[0].title,
+            last_due_at=snapshot.reminders[0].due_at,
+            last_listed_ids=[item.reminder_id for item in snapshot.reminders[:20]],
+        )
     lines = ["Current overview:"]
 
     if snapshot.calendar_events:

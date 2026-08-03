@@ -2,7 +2,9 @@
 
 import backend.agent.chat.chat_tool_helpers as chat_tool_helpers
 import backend.agent.chat.assistant_chat_tools as chat_tools
+import backend.agent.chat.chat_personal_organization_action_planner as personal_org_planner
 from backend.agent.host_action_approvals import clear_host_action_trust, clear_pending_host_approval
+from backend.agent.chat.chat_request_planner import PlannedToolRoute, PlannedToolStep
 from backend.agent.integration_facade import (
     CalendarAgendaResult,
     CalendarEventDetails,
@@ -38,6 +40,321 @@ def test_natural_language_weather_request_is_handled(monkeypatch):
     assert "Clear sky" in response.reply
     assert response.tool_kind == "weather"
     assert response.tool_payload["icon_name"] == "sun"
+
+
+def test_top_level_planner_routes_to_organizer_before_legacy_domain_checks(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_personal_organization_request",
+        lambda *args, **kwargs: None,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_tool_request_route",
+        lambda text, active_domain=None: PlannedToolRoute(
+            is_tool_request=True,
+            domain="organizer",
+            normalized_request="show all my calendar events and reminders",
+            confidence="high",
+            reason="Combined overview request.",
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_organizer_tool_response_impl",
+        lambda text, *, conversation_id, ToolChatResponse: seen.append(text)
+        or ToolChatResponse(handled=True, reply="Current overview:\n- reminder\n- event", active_domain="organizer"),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("reminder handler should not run first")),
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "Could you give me the whole picture of my schedule and reminders?"
+    )
+
+    assert response.handled is True
+    assert response.active_domain == "organizer"
+    assert "Current overview:" in response.reply
+    assert seen == ["Could you give me the whole picture of my schedule and reminders?"]
+
+
+def test_combined_overview_shortcuts_to_organizer_even_if_planner_is_wrong(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_tool_request_route",
+        lambda text, active_domain=None: PlannedToolRoute(
+            is_tool_request=True,
+            domain="reminder",
+            normalized_request="show all reminders and events",
+            confidence="high",
+            reason="Wrong planner route.",
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "execute_organizer_action",
+        lambda action, *, text, conversation_id: "Current overview:\n- reminder\n- event",
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("reminder handler should not win this route")),
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "Can you please output all of my reminders and all of my events?"
+    )
+
+    assert response.handled is True
+    assert response.active_domain == "organizer"
+    assert "Current overview:" in response.reply
+
+
+def test_personal_organization_planner_executes_structured_reminder_action_without_reparsing(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_personal_organization_request",
+        lambda *args, **kwargs: personal_org_planner.PersonalOrganizationPlan(
+            confidence="high",
+            actions=(
+                personal_org_planner.PersonalOrganizationAction(
+                    domain="reminder",
+                    action="move",
+                    query="Go to Costco",
+                    when_text="tomorrow at 9am",
+                ),
+            ),
+            reason="Structured reminder move.",
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("free-text reminder parser should not run")),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "execute_reminder_plan",
+        lambda plan, conversation_id=None: f"Moved `{plan.query}` to `{plan.when_text}`.",
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "Please change that reminder to tomorrow at 9am."
+    )
+
+    assert response.handled is True
+    assert response.active_domain == "reminder"
+    assert "Moved `Go to Costco`" in response.reply
+
+
+def test_personal_organization_planner_acknowledges_single_reminder_target_confirmation(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "get_active_follow_up_domain",
+        lambda conversation_id: "reminder",
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "get_reminder_context",
+        lambda conversation_id: type(
+            "ReminderContext",
+            (),
+            {"last_action": "move", "last_title": "Go to Costco", "last_listed_ids": (1,)},
+        )(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("free-text reminder parser should not run")),
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "the one and only that we have please.",
+        conversation_id=991,
+    )
+
+    assert response.handled is True
+    assert response.active_domain == "reminder"
+    assert "I'm looking at reminder `Go to Costco`." in response.reply
+
+
+def test_personal_organization_planner_keeps_time_update_actionable(monkeypatch):
+    reminder_context = type(
+        "ReminderContext",
+        (),
+        {"last_action": "move", "last_title": "Go to Costco", "last_listed_ids": (1,)},
+    )()
+    monkeypatch.setattr(
+        personal_org_planner,
+        "generate_reply",
+        lambda *args, **kwargs: (
+            '{"is_personal_organization_request": true, "confidence": "high", "reason": "Reminder update.", '
+            '"actions": [{"domain": "reminder", "action": "move", "query": "Go to Costco", "when_text": "9 a.m", '
+            '"normalized_request": "move reminder Go to Costco to 9 a.m"}]}'
+        ),
+        raising=True,
+    )
+
+    plan = personal_org_planner.maybe_plan_personal_organization_request(
+        "Yes, that is the one. Please make sure that is at 9 a.m.",
+        active_domain="reminder",
+        reminder_context=reminder_context,
+        calendar_context=None,
+        organizer_context=None,
+    )
+
+    assert plan is not None
+    assert plan.actions[0].action == "move"
+    assert plan.actions[0].query == "Go to Costco"
+
+
+def test_top_level_planner_executes_compound_steps(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_personal_organization_request",
+        lambda *args, **kwargs: None,
+        raising=True,
+    )
+    seen_reminder_prompts = []
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_tool_request_route",
+        lambda text, active_domain=None: PlannedToolRoute(
+            is_tool_request=True,
+            domain="compound",
+            normalized_request=None,
+            confidence="high",
+            reason="Two separate actions.",
+            steps=(
+                PlannedToolStep(domain="reminder", prompt="delete the reminder called Old reminder"),
+                PlannedToolStep(domain="calendar", prompt="move the lunch event to tomorrow at 2pm"),
+            ),
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda text, conversation_id=None: seen_reminder_prompts.append(text) or (
+            "Deleted reminder `Old reminder`." if "Old reminder" in text else None
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "_maybe_calendar_tool_response",
+        lambda text, conversation_id=None: chat_tools.ToolChatResponse(
+            handled=True,
+            reply="I found `Lunch` scheduled for `tomorrow at noon`. Reply `yes` to move it to `tomorrow at 2pm`, or `cancel` to leave it alone.",
+            active_domain="calendar",
+        )
+        if text == "move the lunch event to tomorrow at 2pm"
+        else None,
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "Please delete the reminder called Old reminder and move the lunch event to tomorrow at 2pm."
+    )
+
+    assert response.handled is True
+    assert "Reply `yes` to move it" in response.reply
+    assert any("Old reminder" in prompt for prompt in seen_reminder_prompts)
+
+
+def test_meta_clarification_question_falls_back_instead_of_hitting_reminder_tools(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_personal_organization_request",
+        lambda *args, **kwargs: None,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_tool_request_route",
+        lambda text, active_domain=None: None,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("reminder handler should not run")),
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "Okay now to be clear is that a reminder or is that an event?",
+        conversation_id=81,
+    )
+
+    assert response.handled is False
+
+
+def test_meta_clarification_reports_recent_calendar_and_reminder(monkeypatch):
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_personal_organization_request",
+        lambda *args, **kwargs: None,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_plan_tool_request_route",
+        lambda text, active_domain=None: None,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "get_calendar_context",
+        lambda conversation_id: type(
+            "CalendarContext",
+            (),
+            {"last_action": "create", "last_query": "go to Costco tomorrow at 12 noon"},
+        )(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "get_reminder_context",
+        lambda conversation_id: type(
+            "ReminderContext",
+            (),
+            {"last_action": "create", "last_title": "Go to Costco"},
+        )(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "maybe_handle_reminder_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("reminder handler should not run")),
+        raising=True,
+    )
+
+    response = chat_tools.maybe_handle_assistant_tool_request(
+        "Okay now to be clear is that a reminder or is that an event?",
+        conversation_id=81,
+    )
+
+    assert response.handled is True
+    assert response.active_domain == "organizer"
+    assert "That created both" in response.reply
 
 
 def test_natural_language_calendar_setup_phrase_reports_local_calendar_ready():
@@ -249,6 +566,7 @@ def test_fuzzy_workspace_git_question_is_handled(monkeypatch):
 
     response = chat_tools.maybe_handle_assistant_tool_request(
         "What changed recently in the repo?",
+        conversation_id=512,
         agent_access_mode="full_access",
     )
 

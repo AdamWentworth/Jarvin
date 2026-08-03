@@ -8,6 +8,9 @@ import backend.agent.briefing.brief_request_tools as briefing_tools
 
 def test_morning_brief_combines_weather_calendar_and_reminders(monkeypatch):
     now = datetime.now().astimezone()
+    due_today = now.replace(hour=23, minute=30, second=0, microsecond=0)
+    if due_today <= now:
+        due_today = now.replace(hour=23, minute=59, second=0, microsecond=0)
 
     monkeypatch.setattr(
         briefing_tools,
@@ -68,7 +71,7 @@ def test_morning_brief_combines_weather_calendar_and_reminders(monkeypatch):
             {
                 "id": 1,
                 "title": "Call mom",
-                "due_at": (now + timedelta(hours=2)).isoformat(),
+                "due_at": due_today.isoformat(),
                 "recurrence": "once",
                 "is_overdue": False,
             }

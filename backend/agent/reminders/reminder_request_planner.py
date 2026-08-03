@@ -51,11 +51,49 @@ _ROUTINE_HINTS = (
 )
 
 _PRONOUN_REFERENCES = ("that", "it", "that reminder", "this reminder", "that task", "this task")
+_SINGLE_TARGET_HINTS = (
+    "single reminder",
+    "one and only",
+    "only reminder",
+    "the one we have",
+    "that is the one",
+    "that's the one",
+)
 _ACTION_PREFIXES = {
     "complete": ("mark", "complete", "finish"),
     "delete": ("delete", "remove", "cancel"),
     "move": ("move", "reschedule", "delay", "postpone", "push", "shift"),
 }
+_MOVE_UPDATE_HINTS = (
+    "move",
+    "reschedule",
+    "delay",
+    "postpone",
+    "push",
+    "shift",
+    "change",
+    "update",
+    "make sure",
+    "set",
+)
+_ADDITIONAL_REMINDER_HINTS = (
+    "as well",
+    "also",
+    "another reminder",
+    "another one",
+    "one more reminder",
+    "one more",
+)
+_CORRECTION_HINTS = (
+    "i meant",
+    "meant",
+    "actually",
+    "instead",
+    "not right",
+    "wrong",
+    "should be",
+    "supposed to",
+)
 
 
 @dataclass(frozen=True)
@@ -74,6 +112,7 @@ class ReminderPlan:
 class ReminderConversationContext:
     last_action: str = "unknown"
     last_title: str | None = None
+    last_due_at: str | None = None
     last_listed_ids: tuple[int, ...] = ()
     awaiting_time_title: str | None = None
     awaiting_time_recurrence: str | None = None
@@ -119,6 +158,7 @@ def remember_reminder_context(
     *,
     action: str,
     last_title: str | None = None,
+    last_due_at: str | None = None,
     last_listed_ids: tuple[int, ...] | list[int] | None = None,
     awaiting_time_title: str | None = None,
     awaiting_time_recurrence: str | None = None,
@@ -126,6 +166,7 @@ def remember_reminder_context(
     _reminder_context[_context_key(conversation_id)] = ReminderConversationContext(
         last_action=action or "unknown",
         last_title=last_title,
+        last_due_at=last_due_at,
         last_listed_ids=tuple(int(item) for item in (last_listed_ids or ())),
         awaiting_time_title=awaiting_time_title,
         awaiting_time_recurrence=awaiting_time_recurrence,
@@ -159,6 +200,13 @@ def _heuristic_plan(message: str, *, context: ReminderConversationContext | None
         return ReminderPlan(is_reminder_request=True, action="list", window=_infer_window(lower))
 
     if context and context.last_title and any(reference in lower for reference in _PRONOUN_REFERENCES):
+        if _looks_like_additional_reminder_request(lower):
+            return ReminderPlan(
+                is_reminder_request=True,
+                action="create",
+                title=context.last_title,
+                when_text=message,
+            )
         for action, prefixes in _ACTION_PREFIXES.items():
             if lower.startswith(prefixes):
                 when_text = _extract_move_target(message) if action == "move" else None
@@ -168,6 +216,22 @@ def _heuristic_plan(message: str, *, context: ReminderConversationContext | None
                     query=context.last_title,
                     when_text=when_text,
                 )
+
+    if context and context.last_title and _looks_like_due_follow_up(lower):
+        if _looks_like_reminder_correction(lower):
+            return ReminderPlan(
+                is_reminder_request=True,
+                action="move",
+                query=context.last_title,
+                when_text=message,
+            )
+        if _looks_like_reminder_time_update(lower, context=context):
+            return ReminderPlan(
+                is_reminder_request=True,
+                action="move",
+                query=context.last_title,
+                when_text=message,
+            )
 
     return None
 
@@ -217,6 +281,26 @@ def _looks_like_due_follow_up(lower: str) -> bool:
             "lunch",
         )
     )
+
+
+def _looks_like_reminder_time_update(lower: str, *, context: ReminderConversationContext) -> bool:
+    if not _looks_like_due_follow_up(lower):
+        return False
+    if any(token in lower for token in _MOVE_UPDATE_HINTS):
+        return True
+    if any(token in lower for token in _SINGLE_TARGET_HINTS):
+        return True
+    if lower.startswith("yes") and (context.last_title or context.last_listed_ids):
+        return True
+    return False
+
+
+def _looks_like_additional_reminder_request(lower: str) -> bool:
+    return any(token in lower for token in _ADDITIONAL_REMINDER_HINTS) and _looks_like_due_follow_up(lower)
+
+
+def _looks_like_reminder_correction(lower: str) -> bool:
+    return any(token in lower for token in _CORRECTION_HINTS)
 
 
 def _llm_plan_reminder_request(message: str, *, context: ReminderConversationContext | None) -> ReminderPlan:
@@ -276,6 +360,8 @@ def _resolve_contextual_references(plan: ReminderPlan, *, context: ReminderConve
     if plan.action == "create" and not title and context.awaiting_time_title and (plan.when_text or plan.due_at_iso):
         title = context.awaiting_time_title
         recurrence = recurrence or context.awaiting_time_recurrence or "once"
+    elif plan.action == "create" and not title and context.last_title and (plan.when_text or plan.due_at_iso):
+        title = context.last_title
 
     return ReminderPlan(
         is_reminder_request=plan.is_reminder_request,
@@ -312,6 +398,7 @@ def _context_prompt(context: ReminderConversationContext | None) -> str:
     return (
         f"last_action={context.last_action}\n"
         f"last_title={context.last_title or ''}\n"
+        f"last_due_at={context.last_due_at or ''}\n"
         f"awaiting_time_title={context.awaiting_time_title or ''}\n"
         f"awaiting_time_recurrence={context.awaiting_time_recurrence or ''}"
     )

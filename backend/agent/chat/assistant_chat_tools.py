@@ -10,7 +10,7 @@ from backend.agent.host_action_approvals import (
     get_pending_host_approval, grant_host_action_trust, normalize_agent_access_mode, set_pending_host_approval,
 )
 from backend.agent.briefing.brief_request_tools import handle_brief_command, maybe_handle_brief_request
-from backend.agent.calendar.calendar_request_tools import CalendarPlan, maybe_plan_calendar_request
+from backend.agent.calendar.calendar_request_tools import CalendarPlan, get_calendar_context, maybe_plan_calendar_request
 from backend.agent.chat.chat_intent_patterns import (
     CALENDAR_AUTH_RE as _CALENDAR_AUTH_RE, CALENDAR_CLEAR_LOCATION_RE as _CALENDAR_CLEAR_LOCATION_RE,
     CALENDAR_CLEAR_NOTES_RE as _CALENDAR_CLEAR_NOTES_RE, CALENDAR_DELETE_RE as _CALENDAR_DELETE_RE,
@@ -32,15 +32,23 @@ from backend.agent.chat.chat_assistant_router_adapters import (
     maybe_handle_pending_confirmation_adapter,
     maybe_organizer_tool_response_adapter,
 )
+from backend.agent.chat.chat_organizer_context import get_organizer_context
 from backend.agent.chat.chat_organizer_pending_actions import (
     clear_pending_organizer_cleanup_action,
     get_pending_organizer_cleanup_action,
 )
 from backend.agent.chat.chat_organizer_tools import maybe_organizer_tool_response_impl
+from backend.agent.chat.chat_organizer_tools import execute_organizer_action
 from backend.agent.chat.chat_compound_tool_requests import (
+    execute_compound_tool_steps,
     maybe_compound_tool_response_impl,
     maybe_plan_compound_tool_request,
 )
+from backend.agent.chat.chat_personal_organization_action_planner import (
+    execute_personal_organization_plan,
+    maybe_plan_personal_organization_request,
+)
+from backend.agent.chat.chat_request_planner import maybe_plan_tool_request_route
 from backend.agent.chat.chat_domain_adapters import (
     execute_calendar_plan_adapter, execute_research_plan_adapter, maybe_calendar_tool_response_adapter,
     maybe_research_tool_response_adapter, maybe_weather_tool_response_adapter,
@@ -79,7 +87,12 @@ from backend.agent.chat.chat_followup_context import get_active_follow_up_domain
 from backend.agent.chat.chat_followup_router import has_conflicting_domain_cues, looks_like_ambiguous_follow_up
 from backend.agent.chat.chat_response_utils import finalize_tool_response_impl, safe_tool_call_impl
 from backend.agent.calendar_pending_actions import clear_pending_calendar_action, get_pending_calendar_action
-from backend.agent.reminders.reminder_request_tools import handle_reminder_command, maybe_handle_reminder_request
+from backend.agent.reminders.reminder_request_planner import get_reminder_context
+from backend.agent.reminders.reminder_request_tools import (
+    execute_reminder_plan,
+    handle_reminder_command,
+    maybe_handle_reminder_request,
+)
 from backend.agent.research.research_request_tools import maybe_plan_research_request, remember_research_context
 from backend.agent.tasks.host_task_execution import build_pending_host_task, start_host_task_execution
 from backend.agent.tasks.host_task_planner import maybe_plan_host_task_request
@@ -206,7 +219,9 @@ def maybe_handle_natural_language_tool_request(
         ToolChatResponse=ToolChatResponse,
         calendar_auth_re=_CALENDAR_AUTH_RE,
         begin_calendar_setup=begin_calendar_setup,
+        maybe_personal_organization_planned_response=_maybe_personal_organization_planned_response,
         maybe_active_follow_up_response=_maybe_active_follow_up_response,
+        maybe_planned_tool_response=_maybe_planned_tool_response,
         maybe_organizer_tool_response=lambda text, *, conversation_id, client_session_id, agent_access_mode: maybe_organizer_tool_response_adapter(
             text, conversation_id=conversation_id, ToolChatResponse=ToolChatResponse,
             maybe_organizer_tool_response_impl=maybe_organizer_tool_response_impl,
@@ -222,6 +237,8 @@ def maybe_handle_natural_language_tool_request(
         maybe_handle_brief_request=maybe_handle_brief_request,
         maybe_handle_reminder_request=maybe_handle_reminder_request,
         maybe_calendar_tool_response=_maybe_calendar_tool_response,
+        get_calendar_context=get_calendar_context,
+        get_reminder_context=get_reminder_context,
         maybe_host_task_response=_maybe_host_task_response,
         maybe_workspace_tool_response=_maybe_workspace_tool_response,
         maybe_research_tool_response=_maybe_research_tool_response,
@@ -348,6 +365,101 @@ def _maybe_active_follow_up_response(
         has_conflicting_domain_cues=has_conflicting_domain_cues,
         dispatch_active_follow_up=_dispatch_active_follow_up,
     )
+def _maybe_personal_organization_planned_response(
+    text: str,
+    *,
+    conversation_id: int | None,
+    client_session_id: str | None,
+    agent_access_mode: str | None,
+) -> ToolChatResponse | None:
+    plan = maybe_plan_personal_organization_request(
+        text,
+        active_domain=get_active_follow_up_domain(conversation_id),
+        reminder_context=get_reminder_context(conversation_id),
+        calendar_context=get_calendar_context(conversation_id),
+        organizer_context=get_organizer_context(conversation_id),
+    )
+    if plan is None:
+        return None
+    return execute_personal_organization_plan(
+        plan,
+        source_text=text,
+        conversation_id=conversation_id,
+        ToolChatResponse=ToolChatResponse,
+        execute_reminder_plan=execute_reminder_plan,
+        execute_calendar_plan=_execute_calendar_plan,
+        execute_organizer_action=execute_organizer_action,
+    )
+def _maybe_planned_tool_response(
+    text: str,
+    *,
+    conversation_id: int | None,
+    client_session_id: str | None,
+    agent_access_mode: str | None,
+) -> ToolChatResponse | None:
+    plan = maybe_plan_tool_request_route(
+        text,
+        active_domain=get_active_follow_up_domain(conversation_id),
+    )
+    if plan is None or plan.confidence == "low":
+        return None
+
+    planned_text = plan.normalized_request or text
+    if len(plan.steps) >= 2:
+        refined_compound = maybe_plan_compound_tool_request(text)
+        steps = (
+            refined_compound.steps
+            if refined_compound is not None and len(refined_compound.steps) >= 2
+            else plan.steps
+        )
+        return execute_compound_tool_steps(
+            steps,
+            source_text=text,
+            conversation_id=conversation_id,
+            ToolChatResponse=ToolChatResponse,
+            maybe_handle_reminder_request=maybe_handle_reminder_request,
+            maybe_calendar_tool_response=_maybe_calendar_tool_response,
+        )
+    if plan.domain == "organizer":
+        return maybe_organizer_tool_response_adapter(
+            planned_text,
+            conversation_id=conversation_id,
+            ToolChatResponse=ToolChatResponse,
+            maybe_organizer_tool_response_impl=maybe_organizer_tool_response_impl,
+        )
+    if plan.domain == "compound":
+        return execute_compound_tool_steps(
+            plan.steps,
+            source_text=text,
+            conversation_id=conversation_id,
+            ToolChatResponse=ToolChatResponse,
+            maybe_handle_reminder_request=maybe_handle_reminder_request,
+            maybe_calendar_tool_response=_maybe_calendar_tool_response,
+        )
+    if plan.domain == "weather":
+        return _maybe_weather_tool_response(planned_text, conversation_id=conversation_id)
+    if plan.domain == "brief":
+        reply = maybe_handle_brief_request(planned_text, conversation_id=conversation_id)
+        if reply is None:
+            return None
+        return ToolChatResponse(handled=True, reply=reply, active_domain="brief")
+    if plan.domain == "reminder":
+        reply = maybe_handle_reminder_request(planned_text, conversation_id=conversation_id)
+        if reply is None:
+            return None
+        return ToolChatResponse(handled=True, reply=reply, active_domain="reminder")
+    if plan.domain == "calendar":
+        return _maybe_calendar_tool_response(planned_text, conversation_id=conversation_id)
+    if plan.domain == "workspace":
+        return _maybe_workspace_tool_response(
+            planned_text,
+            conversation_id=conversation_id,
+            client_session_id=client_session_id,
+            agent_access_mode=agent_access_mode,
+        )
+    if plan.domain == "research":
+        return _maybe_research_tool_response(planned_text, conversation_id=conversation_id)
+    return None
 def _dispatch_active_follow_up(
     active_domain: str,
     text: str,

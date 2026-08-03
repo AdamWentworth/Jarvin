@@ -137,6 +137,41 @@ def test_missing_time_sets_follow_up_context(tmp_path, monkeypatch):
         reminder_planner.clear_reminder_context(33)
 
 
+def test_conflicting_due_at_iso_prefers_local_when_text(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path)
+    try:
+        monkeypatch.setattr(
+            reminder_planner,
+            "generate_reply",
+            lambda *args, **kwargs: (
+                '{"is_reminder_request": true, "action": "create", "title": "Go to Costco", '
+                '"when_text": "tomorrow at 9am", "due_at_iso": "2026-04-27T09:00:00Z", "recurrence": "once"}'
+            ),
+            raising=True,
+        )
+
+        reply = maybe_handle_reminder_request(
+            "Please make a reminder tomorrow at 9am to notify me on my phone to remind me to go to Costco at 12pm",
+            conversation_id=34,
+        )
+        items = reminders.list_reminders()
+        expected_due = (datetime.now().astimezone() + timedelta(days=1)).replace(
+            hour=9,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        actual_due = datetime.fromisoformat(items[0]["due_at"])
+
+        assert reply == f"Saved reminder `Go to Costco` for `{expected_due:%Y-%m-%d %I:%M %p}`."
+        assert len(items) == 1
+        assert actual_due.date() == expected_due.date()
+        assert (actual_due.hour, actual_due.minute) == (9, 0)
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(34)
+
+
 def test_pronoun_move_uses_recent_reminder_context(tmp_path):
     _use_temp_db(tmp_path)
     try:
@@ -150,6 +185,186 @@ def test_pronoun_move_uses_recent_reminder_context(tmp_path):
     finally:
         reminders._reset_for_tests()
         reminder_planner.clear_reminder_context(44)
+
+
+def test_planned_update_action_reschedules_recent_reminder(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path)
+    try:
+        original_due = datetime.now().astimezone() + timedelta(days=1, hours=1)
+        reminders.create_reminder("Call mom", due_at=original_due)
+        reminder_planner.remember_reminder_context(45, action="create", last_title="Call mom")
+        monkeypatch.setattr(
+            reminder_planner,
+            "generate_reply",
+            lambda *args, **kwargs: (
+                '{"is_reminder_request": true, "action": "update", "title": "Call mom", '
+                '"when_text": "tomorrow at 9am", "due_at_iso": null, "recurrence": null}'
+            ),
+            raising=True,
+        )
+
+        reply = maybe_handle_reminder_request("update reminder to tomorrow at 9am", conversation_id=45)
+        items = reminders.list_reminders(status="pending", limit=20)
+
+        assert reply is not None
+        assert "Moved `Call mom`" in reply
+        assert len(items) == 1
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(45)
+
+
+def test_planned_update_time_only_keeps_existing_reminder_date(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path)
+    try:
+        original_due = datetime.now().astimezone() + timedelta(days=1, hours=4)
+        reminders.create_reminder("Go to Costco", due_at=original_due)
+        reminder_planner.remember_reminder_context(46, action="list", last_title="Go to Costco", last_listed_ids=[1])
+        monkeypatch.setattr(
+            reminder_planner,
+            "generate_reply",
+            lambda *args, **kwargs: (
+                '{"is_reminder_request": true, "action": "update", "title": "Go to Costco", '
+                '"when_text": "9am", "due_at_iso": null, "recurrence": null}'
+            ),
+            raising=True,
+        )
+
+        reply = maybe_handle_reminder_request("update reminder to 9am", conversation_id=46)
+        items = reminders.list_reminders(status="pending", limit=20)
+        due_at = datetime.fromisoformat(items[0]["due_at"])
+
+        assert reply is not None
+        assert "Moved `Go to Costco`" in reply
+        assert due_at.date() == original_due.date()
+        assert due_at.hour == 9
+        assert due_at.minute == 0
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(46)
+
+
+def test_confirmation_style_time_update_moves_existing_reminder(tmp_path):
+    _use_temp_db(tmp_path)
+    try:
+        original_due = datetime.now().astimezone() + timedelta(days=1, hours=4)
+        reminders.create_reminder("Go to Costco", due_at=original_due)
+        reminder_planner.remember_reminder_context(47, action="list", last_title="Go to Costco", last_listed_ids=[1])
+
+        reply = maybe_handle_reminder_request(
+            "Yes, that is the one. Please make sure that is at 9 a.m.",
+            conversation_id=47,
+        )
+        items = reminders.list_reminders(status="pending", limit=20)
+        due_at = datetime.fromisoformat(items[0]["due_at"])
+
+        assert reply is not None
+        assert "Moved `Go to Costco`" in reply
+        assert due_at.date() == original_due.date()
+        assert due_at.hour == 9
+        assert len(items) == 1
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(47)
+
+
+def test_additional_reminder_follow_up_reuses_current_title_and_date(tmp_path):
+    _use_temp_db(tmp_path)
+    try:
+        original_due = datetime.now().astimezone() + timedelta(days=1, hours=4)
+        created = reminders.create_reminder("Go to Costco", due_at=original_due)
+        reminder_planner.remember_reminder_context(
+            48,
+            action="list",
+            last_title="Go to Costco",
+            last_due_at=created["due_at"],
+            last_listed_ids=[int(created["id"])],
+        )
+
+        reply = maybe_handle_reminder_request(
+            "Okay, for that one reminder, can you please remind me as well at 10 a.m.",
+            conversation_id=48,
+        )
+        items = reminders.list_reminders(status="pending", limit=20)
+        due_times = sorted(datetime.fromisoformat(item["due_at"]) for item in items)
+
+        assert reply is not None
+        assert "Saved reminder `Go to Costco`" in reply
+        assert len(items) == 2
+        assert due_times[0].date() == original_due.date()
+        assert due_times[1].date() == original_due.date()
+        assert {due.hour for due in due_times} == {10, original_due.hour}
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(48)
+
+
+def test_correction_message_moves_recent_reminder_from_context(tmp_path):
+    _use_temp_db(tmp_path)
+    try:
+        original_due = datetime.now().astimezone().replace(hour=9, minute=0, second=0, microsecond=0)
+        created = reminders.create_reminder("Go to Costco", due_at=original_due)
+        reminder_planner.remember_reminder_context(
+            49,
+            action="create",
+            last_title="Go to Costco",
+            last_due_at=created["due_at"],
+            last_listed_ids=[int(created["id"])],
+        )
+
+        reply = maybe_handle_reminder_request(
+            "Why did you save that for today at 9 a.m.? That's not right at all. Obviously, I meant 10 a.m. tomorrow.",
+            conversation_id=49,
+        )
+        items = reminders.list_reminders(status="pending", limit=20)
+        due_at = datetime.fromisoformat(items[0]["due_at"])
+
+        assert reply is not None
+        assert "Moved `Go to Costco`" in reply
+        assert len(items) == 1
+        assert due_at.hour == 10
+        assert due_at.date() == (datetime.now().astimezone().date() + timedelta(days=1))
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(49)
+
+
+def test_unknown_query_uses_single_recently_listed_reminder(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path)
+    try:
+        original_due = datetime.now().astimezone() + timedelta(days=1, hours=2)
+        created = reminders.create_reminder("Go to Costco", due_at=original_due)
+        reminder_planner.remember_reminder_context(
+            50,
+            action="list",
+            last_title="Go to Costco",
+            last_due_at=created["due_at"],
+            last_listed_ids=[int(created["id"])],
+        )
+        monkeypatch.setattr(
+            reminder_planner,
+            "generate_reply",
+            lambda *args, **kwargs: (
+                '{"is_reminder_request": true, "action": "update", "query": "unknown", '
+                '"when_text": "tomorrow at 10am", "due_at_iso": null, "recurrence": null}'
+            ),
+            raising=True,
+        )
+
+        reply = maybe_handle_reminder_request(
+            "You already have the reminder, I'm just asking you to update the time.",
+            conversation_id=50,
+        )
+        items = reminders.list_reminders(status="pending", limit=20)
+        due_at = datetime.fromisoformat(items[0]["due_at"])
+
+        assert reply is not None
+        assert "Moved `Go to Costco`" in reply
+        assert due_at.hour == 10
+        assert len(items) == 1
+    finally:
+        reminders._reset_for_tests()
+        reminder_planner.clear_reminder_context(50)
 
 
 def test_recent_list_bulk_delete_removes_both_reminders(tmp_path):

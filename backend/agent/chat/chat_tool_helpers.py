@@ -8,6 +8,10 @@ import backend.agent.host_tool_runtime as host_tool_runtime
 from backend.agent.calendar.calendar_integration_service import CalendarCreateNeedsMoreDetail
 from backend.agent.calendar.calendar_request_nlu import normalize_calendar_create_text
 from backend.agent.calendar.calendar_request_tools import clear_pending_calendar_create, remember_pending_calendar_create
+from backend.agent.chat.chat_organizer_pending_actions import (
+    PendingOrganizerCleanupAction,
+    set_pending_organizer_cleanup_action,
+)
 from backend.agent.chat.chat_intent_patterns import CALENDAR_MOVE_RE
 from backend.agent.integration_facade import (
     begin_calendar_setup,
@@ -25,6 +29,7 @@ from backend.agent.integration_facade import (
 )
 from backend.agent.calendar_pending_actions import PendingCalendarAction, set_pending_calendar_action
 from backend.ai_engine import build_jarvin_config, generate_reply
+from memory.calendar_events import list_calendar_events
 
 
 def calendar_command_reply(rest: str, *, conversation_id: int | None) -> str:
@@ -111,6 +116,28 @@ def calendar_details_reply(query: str) -> str:
 
 
 def calendar_delete_request_reply(query: str, *, conversation_id: int | None) -> str:
+    if _looks_like_bulk_calendar_delete_query(query):
+        events = list_calendar_events(limit=500)
+        if not events:
+            return "You do not have any calendar events to delete."
+        delete_labels = tuple(
+            f"Calendar event `{item['title']}` at `{format_iso_for_display(str(item['starts_at']))}`"
+            for item in events
+        )
+        set_pending_organizer_cleanup_action(
+            conversation_id,
+            PendingOrganizerCleanupAction(
+                reminder_ids=(),
+                calendar_event_ids=tuple(int(item["id"]) for item in events),
+                keep_labels=(),
+                delete_labels=delete_labels,
+            ),
+        )
+        return (
+            "I can delete these calendar events:\n"
+            + "\n".join(f"- {item}" for item in delete_labels)
+            + "\n\nReply `yes` to confirm, or `cancel` to leave them alone."
+        )
     matches = find_calendar_events(query)
     match = pick_single_calendar_match(matches, query)
     set_pending_calendar_action(
@@ -396,6 +423,29 @@ def describe_calendar_field_update(
 
 def display_event_time(event) -> str:
     return format_iso_for_display(event.starts_at)
+
+
+def _looks_like_bulk_calendar_delete_query(query: str) -> bool:
+    lower = clean_query(query).lower()
+    if not lower:
+        return False
+    exact = {
+        "all",
+        "everything",
+        "all events",
+        "all calendar events",
+        "all appointments",
+        "all meetings",
+        "all of them",
+        "all of this",
+        "it all",
+        "delete it all",
+    }
+    if lower in exact:
+        return True
+    if "all" in lower and any(token in lower for token in ("event", "events", "calendar", "appointments", "meetings")):
+        return True
+    return False
 
 
 def format_iso_for_display(value: str) -> str:

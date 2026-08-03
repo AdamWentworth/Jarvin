@@ -55,3 +55,31 @@ def test_compound_reminder_request_executes_delete_and_create(tmp_path, monkeypa
         reminders._reset_for_tests()
         reminder_planner.clear_reminder_context(conversation_id)
         followup_context.clear_active_follow_up_domain(conversation_id)
+
+
+def test_execute_compound_tool_steps_propagates_shared_date_hint_to_reminder():
+    seen_prompts = []
+
+    response = compound_tools.execute_compound_tool_steps(
+        (
+            compound_tools.CompoundToolStep(domain="calendar", prompt="Please make an event to go to Costco tomorrow at 12 noon"),
+            compound_tools.CompoundToolStep(domain="reminder", prompt="Please make a reminder at 9am to notify me on my phone to remind me to go to Costco at 12pm"),
+        ),
+        source_text=(
+            "Please make me an event to go to Costco tomorrow at 12 noon. "
+            "And then, in a separate thing, please make a reminder at 9am to remind me to go to Costco at 12pm."
+        ),
+        conversation_id=88,
+        ToolChatResponse=chat_tools.ToolChatResponse,
+        maybe_handle_reminder_request=lambda text, conversation_id=None: seen_prompts.append(text) or "Saved reminder `Go to Costco` for `tomorrow at 9am`.",
+        maybe_calendar_tool_response=lambda text, conversation_id=None: chat_tools.ToolChatResponse(
+            handled=True,
+            reply="Created `going to Costco` on your calendar for `tomorrow at noon`.",
+            active_domain="calendar",
+        ),
+    )
+
+    assert response.handled is True
+    assert seen_prompts == [
+        "Please make a reminder tomorrow at 9am to notify me on my phone to remind me to go to Costco at 12pm"
+    ]
