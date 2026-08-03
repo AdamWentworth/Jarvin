@@ -18,16 +18,22 @@ py -3.11 -m venv .venv
 CPU / general path:
 
 ```powershell
-.\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv\Scripts\python -m pip install "setuptools<81" wheel
+.\.venv\Scripts\python -m pip install --no-build-isolation -r requirements.txt
 .\.venv\Scripts\python -m pip install -e .
 ```
 
 Windows + NVIDIA GPU path:
 
 ```powershell
-.\.venv\Scripts\python -m pip install -r requirements-gpu-cu128.txt
+.\.venv\Scripts\python -m pip install "setuptools<81" wheel
+.\.venv\Scripts\python -m pip install --no-build-isolation -r requirements-gpu-cu128.txt
 .\.venv\Scripts\python -m pip install -e .
 ```
+
+The setuptools pin and disabled build isolation are required by the legacy
+`openai-whisper==20230918` source package, which still imports
+`pkg_resources` while building.
 
 ## Core Host Startup
 
@@ -284,7 +290,8 @@ GPU diagnostics:
 ```powershell
 Remove-Item -Recurse -Force .venv
 py -3.11 -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-gpu-cu128.txt
+.\.venv\Scripts\python -m pip install "setuptools<81" wheel
+.\.venv\Scripts\python -m pip install --no-build-isolation -r requirements-gpu-cu128.txt
 .\.venv\Scripts\python -m pip install -e .
 ```
 
