@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import backend.agent.chat.chat_tool_helpers as chat_tool_helpers
 import backend.agent.chat.assistant_chat_tools as chat_tools
@@ -17,7 +17,7 @@ def test_help_command_includes_external_tools(monkeypatch):
         "manifest",
         lambda: {
             "enabled": True,
-            "workspace_root": "D:/Projects/Jarvin",
+            "workspace_root": "D:/Projects/Apps/Jarvin",
             "commands": ["/tool web <query>", "/tool weather <location>", "/tool calendar [days]"],
             "allowed_commands": ["git status"],
             "writes_enabled": True,

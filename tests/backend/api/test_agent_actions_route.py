@@ -28,7 +28,7 @@ async def test_agent_action_log_route_returns_entries(monkeypatch):
                 "detail": "Waiting for approval.",
                 "client_session_id": "session-abc",
                 "trust_scope": "session",
-                "working_directory": r"D:\Projects\Jarvin",
+                "working_directory": r"D:\Projects\Apps\Jarvin",
                 "argv": ["git", "status"],
                 "diff_preview": None,
             }
@@ -43,7 +43,7 @@ async def test_agent_action_log_route_returns_entries(monkeypatch):
     assert response.actions[0].command == "git status"
     assert response.actions[0].client_session_id == "session-abc"
     assert response.actions[0].trust_scope == "session"
-    assert response.actions[0].working_directory == r"D:\Projects\Jarvin"
+    assert response.actions[0].working_directory == r"D:\Projects\Apps\Jarvin"
     assert response.actions[0].argv == ["git", "status"]
 
 

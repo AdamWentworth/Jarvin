@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import pytest
 
@@ -20,7 +20,7 @@ async def test_agent_tools_manifest(monkeypatch):
         "manifest",
         lambda: {
             "enabled": True,
-            "workspace_root": "D:/Projects/Jarvin",
+            "workspace_root": "D:/Projects/Apps/Jarvin",
             "commands": ["/tool help"],
             "allowed_commands": ["rg ..."],
             "writes_enabled": True,

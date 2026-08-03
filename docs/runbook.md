@@ -154,7 +154,7 @@ clients/jarvin-ui/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-ar
 If the phone is connected over USB with developer mode and USB debugging enabled:
 
 ```powershell
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" install -r "D:\Projects\Jarvin\clients\jarvin-ui\artifacts\jarvin-mobile-arm64-debug.apk"
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" install -r "D:\Projects\Apps\Jarvin\clients\jarvin-ui\artifacts\jarvin-mobile-arm64-debug.apk"
 ```
 
 ## Mobile Host Connection

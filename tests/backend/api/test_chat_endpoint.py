@@ -150,7 +150,7 @@ async def test_chat_endpoint_can_include_tts_url(monkeypatch):
     monkeypatch.setattr(chat_mod, "get_conversation_history", lambda conversation_id=None: [], raising=True)
     monkeypatch.setattr(chat_mod, "append_turn", lambda role, message, conversation_id=None, **kwargs: None, raising=True)
     monkeypatch.setattr(chat_mod, "generate_reply", lambda text, cfg=None, context=None: "spoken reply", raising=True)
-    monkeypatch.setattr(chat_mod, "synth_to_wav", lambda text: r"D:\Projects\Jarvin\temp\tts_test.wav", raising=True)
+    monkeypatch.setattr(chat_mod, "synth_to_wav", lambda text: r"D:\Projects\Apps\Jarvin\temp\tts_test.wav", raising=True)
 
     payload = ChatRequest(
         user_text="hello",
@@ -222,7 +222,7 @@ async def test_chat_endpoint_can_speak_tool_command_replies(monkeypatch):
         )(),
         raising=True,
     )
-    monkeypatch.setattr(chat_mod, "synth_to_wav", lambda text: r"D:\Projects\Jarvin\temp\tts_tool.wav", raising=True)
+    monkeypatch.setattr(chat_mod, "synth_to_wav", lambda text: r"D:\Projects\Apps\Jarvin\temp\tts_tool.wav", raising=True)
 
     resp = await chat_mod.chat_endpoint(ChatRequest(user_text="/tool weather Seattle", speak_reply=True))
 

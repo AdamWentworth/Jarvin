@@ -73,7 +73,7 @@ def test_log_persists_session_scope_argv_and_diff_preview(tmp_path):
             command="git diff --stat",
             client_session_id="session-abc",
             trust_scope="session",
-            working_directory=r"D:\Projects\Jarvin",
+            working_directory=r"D:\Projects\Apps\Jarvin",
             argv=["git", "diff", "--stat"],
             diff_preview="--- before\n+++ after",
             detail="Trusted for this client session.",
@@ -83,7 +83,7 @@ def test_log_persists_session_scope_argv_and_diff_preview(tmp_path):
 
         assert fetched["client_session_id"] == "session-abc"
         assert fetched["trust_scope"] == "session"
-        assert fetched["working_directory"] == r"D:\Projects\Jarvin"
+        assert fetched["working_directory"] == r"D:\Projects\Apps\Jarvin"
         assert fetched["argv"] == ["git", "diff", "--stat"]
         assert fetched["diff_preview"] is not None
         assert fetched["diff_preview"].startswith("--- before")
