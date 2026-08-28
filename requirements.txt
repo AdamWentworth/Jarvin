@@ -7,7 +7,7 @@ pydantic-settings==2.15.0
 
 # Whisper + deps
 openai-whisper==20250625
-numpy==1.26.2
+numpy==1.26.4
 
 # Mic capture
 pyaudio==0.2.14
