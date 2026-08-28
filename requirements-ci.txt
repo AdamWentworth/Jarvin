@@ -11,7 +11,7 @@ pydantic-settings==2.15.0
 # Whisper + deps
 torch==2.13.0+cpu
 openai-whisper==20250625
-numpy==1.26.2
+numpy==1.26.4
 
 # Mic capture - SKIPPED in CI: pyaudio==0.2.13
 
