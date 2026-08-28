@@ -40,7 +40,7 @@ If a change affects one part of that loop, trace both the upstream input and dow
 
 - `process_utterance()` already appends conversation turns. Do not duplicate that in the listener.
 - `set_status()` should not create a new UI turn event. Only `set_snapshot()` advances the sequence.
-- GPU setup is currently encoded in `requirements-gpu-cu128.txt` plus `scripts/diagnose_gpu.py`.
+- GPU setup is currently encoded in `requirements-gpu-cu126.txt` plus `scripts/diagnose_gpu.py`.
 - Keep generated assets and local runtime state out of commits: `.venv/`, `models/`, `temp/`, `data/`, caches, and compiled artifacts.
 
 ## When In Doubt

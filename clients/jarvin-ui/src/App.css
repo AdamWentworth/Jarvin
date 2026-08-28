@@ -224,6 +224,20 @@ code {
   gap: 8px;
 }
 
+.sidebar-brand {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-brand-lockup {
+  display: block;
+  width: 158px;
+  max-width: 100%;
+  height: auto;
+}
+
 .sidebar-close-button,
 .mobile-nav-button {
   display: none;

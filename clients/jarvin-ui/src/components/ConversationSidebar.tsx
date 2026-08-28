@@ -39,10 +39,15 @@ export function ConversationSidebar({
   isMobileOpen,
   onCloseMobile,
 }: ConversationSidebarProps) {
+  const brandLockupUrl = `${import.meta.env.BASE_URL}jarvin-horizontal-lockup-light.png`;
+
   return (
     <aside className={`sidebar-shell ${isMobileOpen ? "mobile-open" : ""}`}>
       <div className="sidebar-top">
-        <div className="eyebrow">Conversations</div>
+        <div className="sidebar-brand">
+          <img className="sidebar-brand-lockup" src={brandLockupUrl} alt="Jarvin" />
+          <div className="eyebrow">Conversations</div>
+        </div>
 
         <div className="sidebar-actions">
           <button

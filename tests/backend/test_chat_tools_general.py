@@ -279,7 +279,7 @@ def test_top_level_planner_executes_compound_steps(monkeypatch):
     assert any("Old reminder" in prompt for prompt in seen_reminder_prompts)
 
 
-def test_meta_clarification_question_falls_back_instead_of_hitting_reminder_tools(monkeypatch):
+def test_meta_clarification_without_context_is_guarded_instead_of_hitting_reminder_tools(monkeypatch):
     monkeypatch.setattr(
         chat_tools,
         "maybe_plan_personal_organization_request",
@@ -304,7 +304,10 @@ def test_meta_clarification_question_falls_back_instead_of_hitting_reminder_tool
         conversation_id=81,
     )
 
-    assert response.handled is False
+    assert response.handled is True
+    assert response.tool_kind == "capability_guard"
+    assert response.tool_payload["status"] == "not_executed"
+    assert response.tool_payload["domain"] == "organizer"
 
 
 def test_meta_clarification_reports_recent_calendar_and_reminder(monkeypatch):

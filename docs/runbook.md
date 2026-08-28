@@ -27,7 +27,7 @@ Windows + NVIDIA GPU path:
 
 ```powershell
 .\.venv\Scripts\python -m pip install "setuptools<81" wheel
-.\.venv\Scripts\python -m pip install --no-build-isolation -r requirements-gpu-cu128.txt
+.\.venv\Scripts\python -m pip install --no-build-isolation -r requirements-gpu-cu126.txt
 .\.venv\Scripts\python -m pip install -e .
 ```
 
@@ -291,7 +291,7 @@ GPU diagnostics:
 Remove-Item -Recurse -Force .venv
 py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install "setuptools<81" wheel
-.\.venv\Scripts\python -m pip install --no-build-isolation -r requirements-gpu-cu128.txt
+.\.venv\Scripts\python -m pip install --no-build-isolation -r requirements-gpu-cu126.txt
 .\.venv\Scripts\python -m pip install -e .
 ```
 

@@ -12,11 +12,18 @@ Jarvin is meant to become a local-first personal AI assistant that can be used i
 
 The long-term goal is closer to "my own Codex that can speak" than to "a single chatbot with a microphone attached."
 
+## Current Positioning
+
+Jarvin is a research prototype. On the current 8 GB GPU, its small local models are suitable for conversation, intent proposals, and experimentation—not unsupervised control of personal state.
+
+For managed domains such as calendar, reminders, weather, and host actions, a response only counts as successful when deterministic code performs or verifies the operation. If no constrained planner accepts the request, Jarvin must fail closed and say that nothing happened instead of allowing the language model to narrate success.
+
 ## Product Principles
 
 - Local-first by default: regular inference should stay on-device.
 - Mode-aware, not one-size-fits-all: fast voice turns and deep agent work have different latency and model needs.
 - Safe execution boundaries: agent abilities should be explicit and toggleable, not always-on.
+- Verifiable outcomes over confident prose: model claims never substitute for tool results.
 - Text remains first-class: every voice interaction should still have a text representation for review, editing, and debugging.
 - Spoken output is optional: TTS should be a presentation layer, not a requirement for every reply.
 - The main host matters more than the clients: Jarvin should eventually be able to run on one trusted machine while lighter devices connect to it privately.

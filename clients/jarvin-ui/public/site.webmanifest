@@ -1,0 +1,17 @@
+{
+  "name": "Jarvin — Private Local AI",
+  "short_name": "Jarvin",
+  "description": "A private, local-first personal AI assistant.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#07111f",
+  "theme_color": "#07111f",
+  "icons": [
+    {
+      "src": "jarvin-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

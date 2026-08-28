@@ -46,8 +46,9 @@ The desktop and mobile clients reuse the same React frontend and talk to the Pyt
 1. A client sends `POST /chat`
 2. The chat route first tries natural-language tool handling
 3. If a tool or planner handles the turn, the tool reply is returned and optionally spoken
-4. Otherwise Jarvin falls back to normal LLM chat generation
-5. The turn is persisted to SQLite
+4. If a managed calendar, reminder, organizer, or live-weather request remains unhandled, the capability guard reports that no operation occurred
+5. Only ordinary conversation falls back to normal LLM chat generation
+6. The turn is persisted to SQLite
 
 ### Remote Voice
 
@@ -86,6 +87,7 @@ Composes the FastAPI app, mounts routers, serves the shared frontend at `/app/`,
 
 `backend/api/routes/chat.py`
 `backend/agent/chat/assistant_chat_tools.py`
+`backend/agent/chat/chat_capability_guard.py`
 
 This layer does the assistant orchestration.
 
@@ -94,6 +96,7 @@ It currently handles:
 - explicit `/tool ...` commands
 - natural-language planner routing
 - pending confirmations and approvals for risky host actions
+- fail-closed handling when a managed request cannot be translated into a verified operation
 - task-scoped host plans with task cards and progress updates
 - fallback to normal LLM chat when no tool path applies
 
@@ -234,6 +237,7 @@ Jarvin can search, fetch top pages, and summarize what it found.
 - The host is the source of truth for state, tools, and integrations.
 - Clients are thin shells and should not own durable assistant state.
 - Planner output should stay constrained and feed deterministic tool calls.
+- A language-model response must never stand in for a calendar, reminder, weather, or host-tool result.
 - Risky actions should remain confirmable and auditable.
 - Natural-language flexibility should come from planner layers, not from letting the LLM freestyle raw side effects.
 

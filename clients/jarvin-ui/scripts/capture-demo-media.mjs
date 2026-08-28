@@ -140,9 +140,22 @@ function approvalPayload(status = "pending") {
   };
 }
 
+function capabilityGuardPayload() {
+  return {
+    status: "not_executed",
+    domain: "reminder",
+    operation: "update",
+    explanation: "No deterministic tool accepted this request, so Jarvin blocked free-form model fallback.",
+    examples: [
+      "Show my pending reminders.",
+      "Move the Costco reminder to tomorrow at 9 AM.",
+    ],
+  };
+}
+
 function createDemoState(activeConversationId = 1) {
   const profile = {
-    name: "Adam",
+    name: "Demo User",
     goal: "Ship polished project demos into Phlosion without manual filming.",
     mood: "Focused",
     communication_style: "Direct",
@@ -199,10 +212,23 @@ function createDemoState(activeConversationId = 1) {
         tool_payload: approvalPayload("pending"),
       },
     ],
+    5: [
+      {
+        role: "user",
+        message: "Change that reminder to 9 AM.",
+      },
+      {
+        role: "assistant",
+        message:
+          "I recognized this as a reminder request, but I couldn't translate it into a verified operation. I did not read or change reminder data. Please rephrase it as one explicit action.",
+        tool_kind: "capability_guard",
+        tool_payload: capabilityGuardPayload(),
+      },
+    ],
   };
 
   return {
-    nextConversationId: 5,
+    nextConversationId: 6,
     activeConversationId,
     profile,
     histories,
@@ -273,6 +299,7 @@ function conversationTitle(id) {
       2: "Workspace tasks",
       3: "Voice review",
       4: "Approval guardrails",
+      5: "Verified boundaries",
     }[id] ?? `Conversation ${id}`
   );
 }
@@ -615,9 +642,10 @@ async function waitForHttp(url, timeoutMs = 30_000) {
 async function startViteServer() {
   const port = await findOpenPort(Number(process.env.JARVIN_DEMO_PORT ?? 5178));
   const url = `http://127.0.0.1:${port}`;
+  const viteEntry = path.join(appRoot, "node_modules", "vite", "bin", "vite.js");
   const child = spawn(
-    "npm",
-    ["run", "dev", "--", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    process.execPath,
+    [viteEntry, "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
     {
       cwd: appRoot,
       env: { ...process.env, BROWSER: "none" },
@@ -892,6 +920,9 @@ async function captureScreenshots(browser, appUrl) {
   await selectConversation(page, "Workspace tasks");
   await captureScreenshot(page, "jarvin-host-task-approval-desktop");
 
+  await selectConversation(page, "Verified boundaries");
+  await captureScreenshot(page, "jarvin-capability-boundary-desktop");
+
   await clickLocator(page, page.getByLabel("Open settings"), { label: "settings" });
   await captureScreenshot(page, "jarvin-settings-general-desktop");
 
@@ -975,8 +1006,9 @@ async function delay(ms) {
 async function main() {
   await prepareOutput();
   const server = await startViteServer();
-  const browser = await chromium.launch({ chromiumSandbox: false });
+  let browser;
   try {
+    browser = await chromium.launch({ chromiumSandbox: false });
     console.log(`Jarvin demo capture running at ${server.url}`);
     console.log(`Viewport: ${viewport.width}x${viewport.height}`);
     await captureScreenshots(browser, server.url);
@@ -987,7 +1019,7 @@ async function main() {
     await fs.rm(tempVideoDir, { recursive: true, force: true });
     console.log(`Jarvin demo media saved under ${path.relative(process.cwd(), outputRoot)}`);
   } finally {
-    await browser.close().catch(() => {});
+    await browser?.close().catch(() => {});
     await server.stop();
   }
 }

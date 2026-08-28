@@ -33,16 +33,35 @@ class TTYStatus:
     def update(self, s: str) -> None:
         if not self.enabled or s == self._last_str:
             return
-        sys.stderr.write("\r" + s + "\x1b[K")
-        sys.stderr.flush()
+        if not self._write("\r" + s + "\x1b[K"):
+            return
         self._last_str = s
 
     def clear(self) -> None:
         if not self.enabled:
             return
-        sys.stderr.write("\r\x1b[K")
-        sys.stderr.flush()
+        if not self._write("\r\x1b[K"):
+            return
         self._last_str = ""
+
+    def _write(self, text: str) -> bool:
+        try:
+            sys.stderr.write(text)
+            sys.stderr.flush()
+            return True
+        except UnicodeEncodeError:
+            encoding = getattr(sys.stderr, "encoding", None) or "ascii"
+            safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+            try:
+                sys.stderr.write(safe_text)
+                sys.stderr.flush()
+                return True
+            except (OSError, UnicodeError, ValueError):
+                self.enabled = False
+                return False
+        except (OSError, ValueError):
+            self.enabled = False
+            return False
 
 
 def clamp_floor(x: float) -> float:

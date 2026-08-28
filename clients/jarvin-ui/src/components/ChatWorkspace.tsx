@@ -1,12 +1,20 @@
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Bars3Icon, Cog6ToothIcon, MicrophoneIcon, SpeakerWaveIcon, StopIcon } from "@heroicons/react/20/solid";
-import type { ApprovalRequestToolPayload, Choice, ConversationTurn, TaskRequestToolPayload, WeatherToolPayload } from "../lib/types";
+import type {
+  ApprovalRequestToolPayload,
+  CapabilityGuardToolPayload,
+  Choice,
+  ConversationTurn,
+  TaskRequestToolPayload,
+  WeatherToolPayload,
+} from "../lib/types";
 import type { ReasoningEffort } from "../lib/ui";
 import type { ConnectionState, PendingVoiceReview } from "../lib/runtime";
 import { ApprovalRequestCard } from "./ApprovalRequestCard";
 import { TaskRequestCard } from "./TaskRequestCard";
 import { VoiceTranscriptionReviewCard } from "./VoiceTranscriptionReviewCard";
 import { WeatherMessageCard } from "./WeatherMessageCard";
+import { CapabilityGuardCard } from "./CapabilityGuardCard";
 
 type ChatWorkspaceProps = {
   activeConversationTitle: string;
@@ -142,6 +150,13 @@ export function ChatWorkspace({
     return turn.tool_payload as TaskRequestToolPayload;
   }
 
+  function capabilityGuardPayloadForTurn(turn: ConversationTurn): CapabilityGuardToolPayload | null {
+    if (turn.tool_kind !== "capability_guard" || !turn.tool_payload) {
+      return null;
+    }
+    return turn.tool_payload as CapabilityGuardToolPayload;
+  }
+
   return (
     <section className="chat-column">
       <header className="chat-header">
@@ -203,7 +218,8 @@ export function ChatWorkspace({
               const weatherPayload = weatherPayloadForTurn(turn);
               const approvalPayload = approvalPayloadForTurn(turn);
               const taskPayload = taskPayloadForTurn(turn);
-              const hasToolCard = Boolean(weatherPayload || approvalPayload || taskPayload);
+              const capabilityGuardPayload = capabilityGuardPayloadForTurn(turn);
+              const hasToolCard = Boolean(weatherPayload || approvalPayload || taskPayload || capabilityGuardPayload);
 
               return (
                 <article
@@ -214,6 +230,7 @@ export function ChatWorkspace({
                     <div className="message-role">{turn.role === "user" ? "You" : "Jarvin"}</div>
                     <div className="message-text">{turn.message}</div>
                     {weatherPayload ? <WeatherMessageCard payload={weatherPayload} /> : null}
+                    {capabilityGuardPayload ? <CapabilityGuardCard payload={capabilityGuardPayload} /> : null}
                     {approvalPayload ? (
                       <ApprovalRequestCard
                         payload={approvalPayload}

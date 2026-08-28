@@ -12,6 +12,8 @@ The intended shape is:
 
 The goal is not to train a brand-new foundation model. The goal is to build a strong assistant system around good local models, reliable tool use, useful memory, and polished clients.
 
+The current product posture is a research prototype. Reliability work takes priority over expanding autonomous scope while the host is limited to small local models.
+
 ## What Exists Today
 
 - FastAPI host serving the shared `/app/` shell and APIs
@@ -110,8 +112,11 @@ Still needed:
 
 ### Phase 4: Reliability, Guardrails, And Operations
 
-Status: next major focus
+Status: current major focus
 
+- fail-closed routing for managed requests that cannot be verified
+- regression cases based on observed calendar/reminder failures
+- visible client receipts when no action was performed
 - lightweight remote auth
 - device/session trust management
 - clearer host health and background task monitoring
@@ -121,7 +126,6 @@ Status: next major focus
 
 Status: next major product leap
 
-- scheduled morning brief delivery
 - scheduled morning brief delivery
 - richer due reminder notifications
 - host health alerts
@@ -160,9 +164,9 @@ Status: later
 
 If we are choosing what to build next, the highest-value slices are:
 
-1. phone notifications for reminders and briefs
-2. scheduled morning brief delivery and notification background sync
-3. lightweight auth for remote clients
+1. measured tool-routing reliability and regression coverage
+2. lightweight auth for remote clients
+3. phone notifications and scheduled briefs
 4. richer long-term memory and saved preferences
 5. background jobs and watch-style tasks
 
@@ -172,6 +176,7 @@ When choosing between features, prefer the work that makes Jarvin feel more like
 
 That usually means:
 
+- deterministic validation and explicit failure boundaries before broader autonomy
 - planner + tool improvements over more regex
 - client reliability over one-off UI polish
 - proactive delivery over another passive endpoint

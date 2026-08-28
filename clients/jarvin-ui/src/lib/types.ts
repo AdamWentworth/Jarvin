@@ -83,6 +83,14 @@ export interface TaskRequestToolPayload {
   completed_steps?: number;
 }
 
+export interface CapabilityGuardToolPayload {
+  status: string;
+  domain: string;
+  operation: string;
+  explanation: string;
+  examples: string[];
+}
+
 export interface ConversationSummary {
   id: number;
   title: string;
@@ -95,7 +103,7 @@ export interface ConversationTurn {
   role: "user" | "assistant" | string;
   message: string;
   tool_kind?: string | null;
-  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | TaskRequestToolPayload | Record<string, unknown> | null;
+  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | TaskRequestToolPayload | CapabilityGuardToolPayload | Record<string, unknown> | null;
 }
 
 export interface WorkspaceBootstrapResponse {
@@ -117,7 +125,7 @@ export interface ChatResponse {
   conversation_id: number | null;
   tts_url?: string | null;
   tool_kind?: string | null;
-  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | TaskRequestToolPayload | Record<string, unknown> | null;
+  tool_payload?: WeatherToolPayload | ApprovalRequestToolPayload | TaskRequestToolPayload | CapabilityGuardToolPayload | Record<string, unknown> | null;
 }
 
 export interface TranscribeResponse {

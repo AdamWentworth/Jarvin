@@ -19,6 +19,17 @@ from backend.agent.voice.voice_listener_clarification_state import clear_listene
 
 log = logging.getLogger("jarvin")
 
+_UTTERANCE_END = object()
+
+
+def _next_utterance_or_end(utterances):
+    """Return a sentinel instead of leaking StopIteration through an asyncio Future."""
+    try:
+        return next(utterances)
+    except StopIteration:
+        return _UTTERANCE_END
+
+
 async def _watch_stop_event(stop_event: asyncio.Event, loop: AudioLoop) -> None:
     await stop_event.wait()
     try:
@@ -81,15 +92,16 @@ async def run_listener(stop_event: asyncio.Event, initial_delay: float = 0.2) ->
             while not stop_event.is_set():
                 cycle_t0 = time.perf_counter()
                 try:
-                    pcm, sr = await asyncio.to_thread(next, utter_gen)
-                except StopIteration:
-                    return
+                    utterance = await asyncio.to_thread(_next_utterance_or_end, utter_gen)
                 except Exception as e:
                     if stop_event.is_set():
                         return
                     log.exception("VAD stream error: %s", e)
                     await asyncio.sleep(0.05)
                     continue
+                if utterance is _UTTERANCE_END:
+                    return
+                pcm, sr = utterance
 
                 set_status(processing=True)
 

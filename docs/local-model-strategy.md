@@ -7,8 +7,12 @@ This strategy is written for the current local setup:
 - Windows
 - NVIDIA GTX 1070 with 8 GB VRAM
 - about 64 GB system RAM
+- Python 3.11
+- PyTorch 2.13.0 with the CUDA 12.6 wheel, which retains Pascal (`sm_61`) support
 - `llama-cpp-python==0.3.4`
 - Whisper on CUDA when available
+
+These versions are compatibility choices, not neglected upgrades. Python 3.11 remains security-supported and has the broadest prebuilt-wheel coverage for this Windows AI stack. The newer `llama-cpp-python==0.3.35` CUDA wheel was tested on this host but failed model initialization with Windows error `0xc000001d`; 0.3.4 remains the newest locally verified binding for this hardware.
 
 ## Deployment Implication
 

@@ -44,7 +44,8 @@ def test_natural_language_can_create_weekday_routine(tmp_path):
 def test_natural_language_can_list_todays_reminders(tmp_path):
     _use_temp_db(tmp_path)
     try:
-        due_at = datetime.now().astimezone() + timedelta(hours=1)
+        # Keep the fixture on the current date even when this test runs near midnight.
+        due_at = datetime.now().astimezone()
         reminders.create_reminder("Buy groceries", due_at=due_at)
 
         reply = maybe_handle_reminder_request("What do I need to do today?")

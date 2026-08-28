@@ -53,6 +53,82 @@
   border: 1px solid rgba(92, 170, 255, 0.18);
 }
 
+.capability-guard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(245, 180, 72, 0.09) 0%, rgba(24, 27, 32, 0.96) 100%);
+  border: 1px solid rgba(245, 180, 72, 0.24);
+}
+
+.capability-guard-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.capability-guard-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  color: #ffd88a;
+  background: rgba(245, 180, 72, 0.1);
+  border: 1px solid rgba(245, 180, 72, 0.18);
+}
+
+.capability-guard-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.capability-guard-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.capability-guard-copy strong {
+  color: #fff1cf;
+}
+
+.capability-guard-copy span,
+.capability-guard-examples {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.capability-guard-domain {
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #ffd88a;
+  background: rgba(245, 180, 72, 0.08);
+  border: 1px solid rgba(245, 180, 72, 0.2);
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.capability-guard-examples {
+  padding-left: 46px;
+}
+
+.capability-guard-examples ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.capability-guard-examples li + li {
+  margin-top: 4px;
+}
+
 .task-request-card.status-blocked {
   border-color: rgba(217, 83, 79, 0.28);
   background: linear-gradient(180deg, rgba(217, 83, 79, 0.08) 0%, rgba(24, 27, 32, 0.96) 100%);
@@ -409,8 +485,17 @@
   }
 
   .approval-request-header,
-  .approval-request-footer {
+  .approval-request-footer,
+  .capability-guard-header {
     flex-direction: column;
+  }
+
+  .capability-guard-header {
+    display: flex;
+  }
+
+  .capability-guard-examples {
+    padding-left: 0;
   }
 }
 
@@ -425,6 +510,15 @@
 }
 
 .app-shell.mobile-client .approval-request-header,
-.app-shell.mobile-client .approval-request-footer {
+.app-shell.mobile-client .approval-request-footer,
+.app-shell.mobile-client .capability-guard-header {
   flex-direction: column;
+}
+
+.app-shell.mobile-client .capability-guard-header {
+  display: flex;
+}
+
+.app-shell.mobile-client .capability-guard-examples {
+  padding-left: 0;
 }

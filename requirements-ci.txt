@@ -1,37 +1,39 @@
-# requirements-ci.txt - Same as requirements.txt but without pyaudio
-fastapi==0.103.2
-uvicorn==0.29.0
+# CI dependencies use CPU-only Torch and skip the host microphone dependency.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.141.1
+uvicorn==0.52.4
 
 # Config (Pydantic v2)
-pydantic==2.10.3
-pydantic-settings==2.6.1
+pydantic==2.13.4
+pydantic-settings==2.15.0
 
 # Whisper + deps
-torch==2.0.1
-openai-whisper==20230918
+torch==2.13.0+cpu
+openai-whisper==20250625
 numpy==1.26.2
 
 # Mic capture - SKIPPED in CI: pyaudio==0.2.13
 
 # For uploads (the /transcribe endpoint)
-python-multipart==0.0.9
+python-multipart==0.0.32
 
 # For integrations and API clients
-requests==2.32.3
+requests==2.34.2
 
 # For model provisioning from Hugging Face Hub
-huggingface-hub==0.25.2
+huggingface-hub==1.29.0
 
 # llama.cpp Python bindings
 llama-cpp-python==0.3.4
 
 # 🔧 System & hardware info (used by backend/hw_detect.py)
-psutil==5.9.8
+psutil==7.2.2
 
 # Text-to-Speech engine
-pyttsx3==2.90
+pyttsx3==2.99
 
 # Testing
-pytest==8.3.2
-pytest-asyncio>=0.23.5
+pytest==9.1.1
+pytest-asyncio==1.4.0
 httpx==0.28.1

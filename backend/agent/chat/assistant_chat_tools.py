@@ -83,6 +83,7 @@ from backend.agent.chat.chat_pending_actions import maybe_handle_pending_confirm
 from backend.agent.integration_facade import (
     begin_calendar_setup, delete_calendar_event, reschedule_calendar_event, update_calendar_event_fields,
 )
+from backend.agent.chat.chat_capability_guard import maybe_guard_unhandled_managed_request
 from backend.agent.chat.chat_followup_context import get_active_follow_up_domain, remember_active_follow_up_domain
 from backend.agent.chat.chat_followup_router import has_conflicting_domain_cues, looks_like_ambiguous_follow_up
 from backend.agent.chat.chat_response_utils import finalize_tool_response_impl, safe_tool_call_impl
@@ -177,7 +178,22 @@ def maybe_handle_assistant_tool_request(
         client_session_id=client_session_id,
         agent_access_mode=agent_access_mode,
     )
+    if not natural.handled:
+        guard = maybe_guard_unhandled_managed_request(
+            text,
+            active_domain=get_active_follow_up_domain(conversation_id),
+        )
+        if guard is not None:
+            natural = ToolChatResponse(
+                handled=True,
+                reply=guard.reply,
+                tool_kind="capability_guard",
+                tool_payload=guard.payload(),
+                active_domain=guard.domain,
+            )
     return _finalize_tool_response(natural, conversation_id=conversation_id)
+
+
 def maybe_handle_tool_command(
     text: str,
     *,

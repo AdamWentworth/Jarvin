@@ -13,7 +13,7 @@ import {
   saveProfile,
   sendChatMessage,
 } from "./lib/api";
-import type { AgentAccessMode, UserProfilePayload } from "./lib/types";
+import type { AgentAccessMode, ConversationTurn, UserProfilePayload } from "./lib/types";
 import {
   DEFAULT_PROFILE,
   historyTitle,
@@ -35,6 +35,12 @@ import { useJarvinHost } from "./hooks/useJarvinHost";
 import { useConversationWorkspace } from "./hooks/useConversationWorkspace";
 import { AppWorkspaceShell } from "./components/AppWorkspaceShell";
 import { describeError } from "./lib/workspace";
+
+type OptimisticUserTurn = {
+  conversationId: number | null;
+  turn: ConversationTurn;
+};
+
 function App() {
   const isNativeMobileClient = detectMobileClient();
   const [profile, setProfile] = useState<UserProfilePayload>(DEFAULT_PROFILE);
@@ -47,6 +53,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [optimisticUserTurn, setOptimisticUserTurn] = useState<OptimisticUserTurn | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const workspace = useConversationWorkspace({
@@ -70,6 +77,13 @@ function App() {
     [workspace.history],
   );
 
+  const visibleHistory = useMemo(() => {
+    if (!optimisticUserTurn || optimisticUserTurn.conversationId !== workspace.activeConversationId) {
+      return workspace.history;
+    }
+    return [...workspace.history, optimisticUserTurn.turn];
+  }, [optimisticUserTurn, workspace.activeConversationId, workspace.history]);
+
   const host = useJarvinHost({
     activeConversationId: workspace.activeConversationId,
     describeError,
@@ -87,6 +101,16 @@ function App() {
     if (isReplyAudioPlaying) {
       stopReplyAudio({ quiet: true });
     }
+
+    setSending(true);
+    setOptimisticUserTurn({
+      conversationId: workspace.activeConversationId,
+      turn: { role: "user", message: text },
+    });
+    if (rawText === undefined) {
+      setChatInput("");
+    }
+    setChatStatus("Thinking...");
 
     if (source === "typed") {
       setRemoteVoiceDiagnostics((current) => ({
@@ -108,15 +132,16 @@ function App() {
         const createdWorkspace = await createConversation();
         workspace.syncWorkspace(createdWorkspace);
         conversationId = createdWorkspace.active_conversation_id;
+        setOptimisticUserTurn((current) => (current ? { ...current, conversationId } : current));
       } catch (error) {
         setRemoteVoiceStage("chat", "error");
         setRemoteVoiceDiagnostics((current) => ({ ...current, note: "Could not create a conversation for the new message." }));
         setChatStatus(describeError(error));
+        setSending(false);
         return;
       }
     }
 
-    setSending(true);
     try {
       if (
         host.selectedBackend !== (host.llmOptions?.current_backend ?? "") ||
@@ -126,7 +151,6 @@ function App() {
         await host.handleApplyLlmSettings();
       }
 
-      setChatStatus("Thinking...");
       const response = await sendChatMessage({
         userText: text,
         conversationId,
@@ -141,9 +165,7 @@ function App() {
 
       const activatedWorkspace = await activateConversation(nextConversationId);
       workspace.syncWorkspace(activatedWorkspace);
-      if (rawText === undefined) {
-        setChatInput("");
-      }
+      setOptimisticUserTurn(null);
 
       if (response.tts_url) {
         setLatestReplyAudioUrl(response.tts_url);
@@ -250,7 +272,7 @@ function App() {
       return;
     }
     node.scrollTop = node.scrollHeight;
-  }, [workspace.history, sending]);
+  }, [visibleHistory, sending]);
 
   useEffect(() => {
     if (workspace.openConversationMenuId === null && workspace.editingConversationId === null && !isSettingsOpen) {
@@ -398,7 +420,7 @@ function App() {
       editingConversationId={workspace.editingConversationId}
       editingConversationTitle={workspace.editingConversationTitle}
       health={host.health}
-      history={workspace.history}
+      history={visibleHistory}
       isClientOnline={host.isClientOnline}
       isListening={Boolean(host.status?.listening)}
       isMobileSidebarOpen={isMobileSidebarOpen}
