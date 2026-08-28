@@ -7,7 +7,7 @@ pydantic-settings==2.15.0
 
 # Whisper + deps
 openai-whisper==20250625
-numpy==1.26.2
+numpy==2.4.6
 
 # Mic capture
 pyaudio==0.2.14
@@ -22,7 +22,7 @@ requests==2.34.2
 huggingface-hub==1.29.0
 
 # llama.cpp Python bindings
-llama-cpp-python==0.3.4
+llama-cpp-python==0.3.35
 
 # 🔧 System & hardware info (used by backend/hw_detect.py)
 psutil==7.2.2
