@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/assets/jarvin-banner.svg" alt="Jarvin — a private, local-first personal AI assistant" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/jarvin-horizontal-lockup-light.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/jarvin-horizontal-lockup-dark.png" />
+    <img src="docs/assets/jarvin-horizontal-lockup-dark.png" width="720" alt="Jarvin" />
+  </picture>
 </p>
 
 <p align="center">

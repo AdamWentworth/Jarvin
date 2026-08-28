@@ -6,10 +6,15 @@ import sys
 import server
 
 
-def test_launch_repo_venv_reexecs_when_current_python_is_not_repo_venv(tmp_path):
-    target = tmp_path / ".venv" / "Scripts" / "python.exe"
+def _create_repo_venv_python(tmp_path: Path) -> Path:
+    target = server._repo_venv_python(tmp_path / "server.py")
     target.parent.mkdir(parents=True)
     target.write_text("")
+    return target
+
+
+def test_launch_repo_venv_reexecs_when_current_python_is_not_repo_venv(tmp_path):
+    target = _create_repo_venv_python(tmp_path)
 
     captured: dict[str, object] = {}
 
@@ -21,7 +26,7 @@ def test_launch_repo_venv_reexecs_when_current_python_is_not_repo_venv(tmp_path)
     rc = server._launch_repo_venv_if_needed(
         script_path=tmp_path / "server.py",
         argv=["server.py"],
-        current_executable=r"C:\Python311\python.exe",
+        current_executable=tmp_path / "system-python",
         environ={},
         run_cmd=fake_run,
     )
@@ -32,9 +37,7 @@ def test_launch_repo_venv_reexecs_when_current_python_is_not_repo_venv(tmp_path)
 
 
 def test_launch_repo_venv_skips_when_already_using_repo_venv(tmp_path):
-    target = tmp_path / ".venv" / "Scripts" / "python.exe"
-    target.parent.mkdir(parents=True)
-    target.write_text("")
+    target = _create_repo_venv_python(tmp_path)
 
     rc = server._launch_repo_venv_if_needed(
         script_path=tmp_path / "server.py",
@@ -60,9 +63,7 @@ def test_launch_repo_venv_skips_when_repo_venv_is_missing(tmp_path):
 
 
 def test_launch_repo_venv_treats_keyboard_interrupt_as_clean_exit(tmp_path):
-    target = tmp_path / ".venv" / "Scripts" / "python.exe"
-    target.parent.mkdir(parents=True)
-    target.write_text("")
+    _create_repo_venv_python(tmp_path)
 
     def interrupted_run(cmd, env):
         raise KeyboardInterrupt()
@@ -70,7 +71,7 @@ def test_launch_repo_venv_treats_keyboard_interrupt_as_clean_exit(tmp_path):
     rc = server._launch_repo_venv_if_needed(
         script_path=tmp_path / "server.py",
         argv=["server.py"],
-        current_executable=r"C:\Python313\python.exe",
+        current_executable=tmp_path / "system-python",
         environ={},
         run_cmd=interrupted_run,
     )

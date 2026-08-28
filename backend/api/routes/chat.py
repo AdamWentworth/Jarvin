@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import ntpath
 from fastapi import APIRouter
 
 from backend.api.schemas import ChatRequest, ChatResponse, ErrorResponse
@@ -45,7 +45,7 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         if payload.speak_reply and tool_response.reply.strip():
             try:
                 tts_path = await asyncio.to_thread(synth_to_wav, tool_response.reply)
-                tts_url = f"/_temp/{os.path.basename(tts_path)}"
+                tts_url = f"/_temp/{ntpath.basename(tts_path)}"
             except Exception as exc:
                 log.exception("Tool reply speech synthesis failed: %s", exc)
         append_turn("user", text, conversation_id=payload.conversation_id)
@@ -102,7 +102,7 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse | ErrorResponse:
         if payload.speak_reply and reply.strip():
             try:
                 tts_path = await asyncio.to_thread(synth_to_wav, reply)
-                tts_url = f"/_temp/{os.path.basename(tts_path)}"
+                tts_url = f"/_temp/{ntpath.basename(tts_path)}"
             except Exception as exc:
                 log.exception("Reply speech synthesis failed: %s", exc)
         # Persist turn so subsequent requests have fresh context

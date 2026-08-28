@@ -9,6 +9,17 @@ updates:
       time: "09:00"
       timezone: America/Los_Angeles
     open-pull-requests-limit: 3
+    ignore:
+      # Host and CI Torch builds use different indexes/variants; update them together manually.
+      - dependency-name: torch
+      # 0.3.35 was tested on the GTX 1070 host and crashes during model initialization.
+      - dependency-name: llama-cpp-python
+        versions:
+          - ">=0.3.5"
+      # Keep the stable NumPy 1.x ABI until the native audio/model stack is migrated together.
+      - dependency-name: numpy
+        update-types:
+          - version-update:semver-major
     groups:
       python-dependencies:
         patterns:
@@ -22,6 +33,11 @@ updates:
       time: "09:00"
       timezone: America/Los_Angeles
     open-pull-requests-limit: 3
+    ignore:
+      # Framework/toolchain majors are evaluated and migrated deliberately as a set.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
     groups:
       frontend-dependencies:
         patterns:
