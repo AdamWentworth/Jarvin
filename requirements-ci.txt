@@ -1,4 +1,4 @@
-# CI dependencies use CPU-only Torch and skip the host microphone dependency.
+# CI uses CPU-only Torch and skips host-only native microphone and llama.cpp bindings.
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 fastapi==0.141.1
@@ -23,9 +23,6 @@ requests==2.34.2
 
 # For model provisioning from Hugging Face Hub
 huggingface-hub==1.29.0
-
-# llama.cpp Python bindings
-llama-cpp-python==0.3.4
 
 # 🔧 System & hardware info (used by backend/hw_detect.py)
 psutil==7.2.2
