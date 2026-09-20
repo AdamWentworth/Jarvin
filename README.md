@@ -259,3 +259,10 @@ Jarvin/
 ## 🛣️ Current Direction
 
 Jarvin is an active research prototype. The next meaningful work is focused on measured tool reliability, stronger remote authentication, durable preference memory, background jobs, and smoother mobile voice behavior—not pretending a small local model is a dependable autonomous agent or training a new foundation model.
+
+## License
+
+Original source code and text documentation are licensed under the
+[Apache License 2.0](LICENSE). Jarvin branding, screenshots, demo media,
+third-party models, assets, and dependencies retain their respective rights;
+see [NOTICE.md](NOTICE.md).
