@@ -9,6 +9,8 @@ Start here before making changes in this repo.
 - `python server.py` is the friendly command, but the repo still expects packages to be installed into `.venv`.
 - Normal operation should remain local-first and offline-first.
 - The long-term deployment target is one trusted host machine with remote personal devices connecting privately over VPN.
+- The planned coordination host is Ubuntu with two RTX 2060 Supers; qualified inference targets may also include the main Windows machine's GTX 1070 and configured external providers. Resource routing and GroundControl execution are not implemented yet.
+- GroundControl owns cross-project context and task/run records; repository docs remain authoritative for project instructions. Jarvin retains assistant behavior and conversation/profile memory. Read the GroundControl integration direction in `docs/architecture.md` before changing these boundaries.
 - User data in `data/` is real local state; treat schema and persistence changes carefully.
 
 ## Mental Model
@@ -34,7 +36,7 @@ If a change affects one part of that loop, trace both the upstream input and dow
 - [`backend/asr/whisper.py`](../backend/asr/whisper.py): Whisper runtime/device behavior
 - [`backend/llm/runtime_llama_cpp.py`](../backend/llm/runtime_llama_cpp.py): local LLM loading and GPU behavior
 - [`memory/conversation.py`](../memory/conversation.py): SQLite state, migrations, active conversation model
-- [`ui/app.py`](../ui/app.py): Gradio composition and polling
+- [`clients/jarvin-ui/src/App.tsx`](../clients/jarvin-ui/src/App.tsx): shared React client composition
 
 ## Repo-Specific Invariants
 

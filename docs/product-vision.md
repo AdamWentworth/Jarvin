@@ -75,11 +75,15 @@ Success looks like:
 
 The intended long-term deployment shape is:
 
-- one stronger host machine runs the Jarvin backend, models, and local data
+- one private coordination host runs the Jarvin backend and assistant data, planned to move to Ubuntu with two RTX 2060 Supers (8 GB each)
+- configured inference targets can include that host, the main Windows machine's GTX 1070, and external providers; allocation follows measured capability and availability
+- GroundControl provides the visual project workspace and owns cross-project context and task/run history, while Jarvin retains conversation/profile memory and assistant behavior
 - other personal devices access Jarvin remotely over a private VPN
 - a phone should be able to serve as a full remote voice client with mic input and spoken output
 - client hardware should matter very little because inference stays on the host
 - the service should be private-first and should not require exposing the app directly to the public internet
+
+These integration and allocation changes were agreed on 2026-10-18 and are planned. The existing implementation is still Windows-first. The first shared workflow is repository dependency maintenance through patches, tests, a pushed branch, and CI, surfacing items that need Adam's eyes. See [the architecture boundary](architecture.md#groundcontrol-integration-direction).
 
 This means future architecture decisions should favor:
 

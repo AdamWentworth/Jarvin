@@ -25,6 +25,8 @@ Jarvin is a private, host-run personal AI assistant built around local models an
 
 One Windows machine runs the backend, model runtimes, voice processing, SQLite state, integrations, and host tools. Other personal devices connect as clients over the local network or WireGuard instead of duplicating the heavyweight runtime.
 
+The agreed direction is to move the primary host to Ubuntu with two RTX 2060 Supers and integrate with GroundControl, a separate visual workspace for project context and task/run history. The main Windows machine's GTX 1070 and configured external providers are potential additional inference targets, selected by capability and availability. This allocation and the first dependency-maintenance workflow remain planned; the current runtime/setup below is Windows-first. See [the integration direction](docs/architecture.md#groundcontrol-integration-direction).
+
 The goal is closer to **a personal Codex that can speak** than a chatbot with a microphone attached: voice and typed conversation, useful memory, deterministic tools, remote clients, and clear approval boundaries for actions on the host.
 
 > [!IMPORTANT]

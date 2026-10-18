@@ -15,6 +15,16 @@ The host machine owns:
 
 Other devices act as clients over local network or WireGuard.
 
+## GroundControl integration direction
+
+Agreed with Adam on 2026-10-18. The existing runtime remains Windows-first; the intended primary host is now Ubuntu with two RTX 2060 Supers, each with 8 GB VRAM. The main Windows machine's GTX 1070 is a possible additional inference target. Multi-host allocation and GroundControl dispatch are planned, not current runtime capabilities.
+
+GroundControl is a separate full-screen workspace for projects, machines, knowledge, and work history. It should first show which item needs Adam's eyes. Repository documentation remains authoritative for each project's instructions and build/test procedures. GroundControl owns cross-project context, handoffs, decisions, tasks, run events, and artifacts; Jarvin owns assistant behavior and conversation/profile memory. Haven remains authoritative for its observations and action boundaries.
+
+Jarvin should retrieve relevant GroundControl context and route work through configured providers/runners. Logical agents share model endpoints instead of loading a copy for each role. Select a qualified resource by task capability, model/context fit, measured memory limits, availability, and queue load. A busy or unsuitable local target can queue work or suggest a configured external provider. Prompt classification, potentially through Jev, is separate from checking actual capacity and dispatching work. There is no fixed conversation-first scheduling requirement, and no classifier/provider framework has been selected.
+
+The first shared workflow is repository dependency maintenance: inspect Dependabot alerts and update PRs, apply appropriate fixes in an isolated worktree, run the repository's checks, push a maintenance branch, and follow CI for that exact commit. GroundControl retains results and raises attention for unresolved failures, conflicts, or decisions needing Adam. Merge, release, and deployment behavior follows the repository's configured workflow. The complete workflow contract lives in GroundControl's `docs/repo-maintenance.md`; this documentation does not connect an executor or GitHub integration.
+
 ## System Shape
 
 ### Host

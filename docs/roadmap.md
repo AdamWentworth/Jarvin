@@ -6,13 +6,16 @@ Jarvin is a private, host-run personal AI assistant.
 
 The intended shape is:
 
-- one Windows host machine running the backend, models, GPU inference, and durable state
+- one private coordination host, planned to move to Ubuntu with two RTX 2060 Supers; the existing implementation remains Windows-first
+- qualified inference targets on that host, the main Windows machine's GTX 1070, or configured external providers, chosen by capability and available capacity
 - desktop and phone clients connecting to that host over local network or WireGuard
 - voice, tools, memory, and integrations layered on top of a local-first core
 
 The goal is not to train a brand-new foundation model. The goal is to build a strong assistant system around good local models, reliable tool use, useful memory, and polished clients.
 
 The current product posture is a research prototype. Reliability work takes priority over expanding autonomous scope while the host is limited to small local models.
+
+GroundControl is a separate visual workspace that owns cross-project context and task/run records. Jarvin retains assistant behavior and conversation/profile memory; repository docs remain authoritative for project instructions, and Haven owns its observations. Multi-host allocation and these integrations are planned. See [the integration boundary](architecture.md#groundcontrol-integration-direction).
 
 ## What Exists Today
 
@@ -164,11 +167,12 @@ Status: later
 
 If we are choosing what to build next, the highest-value slices are:
 
-1. measured tool-routing reliability and regression coverage
-2. lightweight auth for remote clients
-3. phone notifications and scheduled briefs
-4. richer long-term memory and saved preferences
-5. background jobs and watch-style tasks
+1. Measured tool-routing reliability and regression coverage before expanding autonomous scope.
+2. First GroundControl workflow: repository dependency maintenance through supported fixes, local checks, a pushed maintenance branch, and CI for that exact commit, with failures/decisions needing Adam surfaced as attention.
+3. Durable task/run records, relevant context retrieval, and provider/runner boundaries for that workflow.
+4. Host/model qualification and resource allocation using actual capabilities, limits, and availability; no fixed conversation-first priority is required.
+5. Lightweight auth for remote clients and explicit action boundaries.
+6. Phone notifications and scheduled briefs, richer memory/preferences, and broader background jobs as subsequent slices.
 
 ## Decision Rule
 

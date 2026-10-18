@@ -1,8 +1,14 @@
 # Local Model Strategy
 
-## Current Hardware Assumption
+## Deployment direction agreed on 2026-10-18
 
-This strategy is written for the current local setup:
+The planned primary host is Ubuntu with two RTX 2060 Supers (8 GB each). The main Windows machine's GTX 1070 is another potential inference target; configured external providers may handle work when local capacity or capability is insufficient. Share model endpoints across logical agents and qualify model/context limits on each actual target before routing to it. Host availability, measured resource limits, task requirements, and queue load inform allocation; a conversation-first policy is not required. This multi-host routing remains planned.
+
+GroundControl owns the visual project workspace, cross-project knowledge, and task/run records. Jarvin retains assistant behavior and conversation/profile memory, consuming relevant project context from its authoritative sources. See [the integration boundary](architecture.md#groundcontrol-integration-direction).
+
+## Existing Windows baseline
+
+The model recommendations and smoke measurements below describe the existing Windows baseline, not qualification of the planned Ubuntu host:
 
 - Windows
 - NVIDIA GTX 1070 with 8 GB VRAM
@@ -16,7 +22,7 @@ These versions are compatibility choices, not neglected upgrades. Python 3.11 re
 
 ## Deployment Implication
 
-Because the long-term plan is to run Jarvin on one main machine and access it remotely from other devices over VPN, model selection should be optimized for the host machine only.
+Jarvin's coordination host serves thin clients over VPN. Select models for the configured inference host rather than the client device; the proposed additional host/provider targets do not require model weights on every client.
 
 That means:
 
@@ -35,7 +41,7 @@ An Ollama-style headless service becomes interesting when:
 - you want Jarvin to keep full UX control while the host runs model inference in a separate process
 
 The key point is that Ollama should be treated as an optional engine, not as the product surface.
-Jarvin should remain the only user-facing UI and orchestration layer.
+Jarvin remains the assistant entry point. GroundControl is the separate visual workspace and owner of project context and task history; both can use the same configured inference capacity.
 
 ## What This Hardware Is Good At
 
